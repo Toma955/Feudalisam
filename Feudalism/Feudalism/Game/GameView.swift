@@ -194,7 +194,7 @@ struct GameView: NSViewRepresentable {
         }
         scene.onZoomDelta = { [gameState] delta in
             var s = gameState.mapCameraSettings
-            s.currentZoom = min(gameState.mapCameraSettings.zoomMax, max(gameState.mapCameraSettings.zoomMin, s.currentZoom + delta))
+            s.stepZoomPhaseByScroll(zoomIn: delta > 0)
             gameState.mapCameraSettings = s
         }
         scene.onPanChange = { [gameState] screenDelta in

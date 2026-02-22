@@ -34,7 +34,11 @@ final class GameState: ObservableObject {
 
     @Published var gold: Int = 100
     @Published var food: Int = 80
-    @Published var wood: Int = 50
+    @Published var wood: Int = 0
+    @Published var iron: Int = 0
+    @Published var stone: Int = 0
+    @Published var hay: Int = 0
+    @Published var hop: Int = 0
 
     @Published var selectedRegionId: String?
     @Published var selectedMapCoordinate: MapCoordinate?

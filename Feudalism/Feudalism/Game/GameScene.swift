@@ -574,8 +574,8 @@ final class GameScene: SKScene {
         switch code {
         case 126: onTiltDelta?(0.06)
         case 125: onTiltDelta?(-0.06)
-        case 24:  onZoomDelta?(cameraSettings.zoomStep)
-        case 27:  onZoomDelta?(-cameraSettings.zoomStep)
+        case 24:  onZoomDelta?(1)
+        case 27:  onZoomDelta?(-1)
         default: break
         }
     }

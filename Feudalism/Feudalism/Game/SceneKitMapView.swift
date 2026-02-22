@@ -313,7 +313,7 @@ struct SceneKitMapView: NSViewRepresentable {
         }
         container.onZoomDelta = { [gameState] delta in
             var s = gameState.mapCameraSettings
-            s.currentZoom = min(s.zoomMax, max(s.zoomMin, s.currentZoom + delta))
+            s.stepZoomPhaseByScroll(zoomIn: delta > 0)
             gameState.mapCameraSettings = s
         }
         container.onTiltDelta = { [gameState] delta in

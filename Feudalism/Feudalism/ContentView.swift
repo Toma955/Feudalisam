@@ -7,6 +7,55 @@
 
 import SwiftUI
 import AppKit
+import CoreGraphics
+
+/// Vraća novu sliku s bijelom/svijetlom pozadinom pretvorenom u potpuno transparentnu. Koristi NSBitmapImageRep.
+private func imageWithTransparentWhiteBackground(_ image: NSImage, whiteThreshold: UInt8 = 235) -> NSImage? {
+    let width = Int(image.size.width)
+    let height = Int(image.size.height)
+    guard width > 0, height > 0 else { return nil }
+    let bytesPerRow = width * 4
+    guard let rep = NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: width,
+        pixelsHigh: height,
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: bytesPerRow,
+        bitsPerPixel: 32
+    ) else { return nil }
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    image.draw(at: .zero, from: NSRect(origin: .zero, size: image.size), operation: .copy, fraction: 1)
+    NSGraphicsContext.current = nil
+    NSGraphicsContext.restoreGraphicsState()
+    guard let data = rep.bitmapData else { return nil }
+    let threshold = whiteThreshold
+    for y in 0..<height {
+        for x in 0..<width {
+            let offset = y * bytesPerRow + x * 4
+            let r = data[offset]
+            let g = data[offset + 1]
+            let b = data[offset + 2]
+            let a = data[offset + 3]
+            let isWhite = r >= threshold && g >= threshold && b >= threshold
+            let brightness = (Int(r) + Int(g) + Int(b)) / 3
+            let isVeryLight = brightness >= Int(threshold)
+            if (isWhite || isVeryLight) && a > 0 {
+                data[offset] = 0
+                data[offset + 1] = 0
+                data[offset + 2] = 0
+                data[offset + 3] = 0
+            }
+        }
+    }
+    let outImage = NSImage(size: image.size)
+    outImage.addRepresentation(rep)
+    return outImage
+}
 
 /// Jednom pri pokretanju ispiše u konzolu zašto ikone (farm, food, castle, sword) nisu vidljive.
 private func printIconDiagnostics() {
@@ -52,6 +101,36 @@ private func loadBarIcon(named name: String) -> NSImage? {
     return nil
 }
 
+/// Učita ikonu resursa. Slike su već s transparentnom pozadinom – prikazujemo ih izravno.
+private func loadResourceIcon(named name: String) -> NSImage? {
+    loadBarIcon(named: name)
+}
+
+/// Jedan resurs u HUD-u: ikona iz Icons + broj. Ikone u izvornim bojama. iconSize: veličina ikone (default 44, manje = niža traka).
+private struct ResourceRow: View {
+    let iconName: String
+    let value: Int
+    var iconSize: CGFloat = 44
+    private var image: NSImage? { loadResourceIcon(named: iconName) }
+    var body: some View {
+        HStack(spacing: 4) {
+            if let img = image {
+                Image(nsImage: img)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: iconSize, height: iconSize)
+            } else {
+                Image(systemName: "cube.fill")
+                    .font(.system(size: iconSize * 0.6))
+                    .foregroundStyle(.white.opacity(0.95))
+            }
+            Text("\(value)")
+                .font(.system(size: 16, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.95))
+        }
+    }
+}
+
 /// Ikona s asseta ili iz mape Icons; inače SF Symbol. Nazivi: farm, food, castle, sword.
 private struct BarIcon: View {
     let assetName: String
@@ -66,12 +145,18 @@ private struct BarIcon: View {
                     .scaledToFit()
             } else {
                 Image(systemName: systemName)
-                    .font(.system(size: 26))
+                    .font(.system(size: 34))
             }
         }
-        .frame(width: 44, height: 44)
+        .frame(width: 58, height: 58)
         .foregroundStyle(.white.opacity(0.95))
     }
+}
+
+/// Što prikazuje traka resursa: Resources = drvo, kamen, željezo; Food = kruh, hmelj, žito.
+private enum ResourceStripMode {
+    case resources  // drvo, kamen, željezo
+    case food       // kruh, hmelj, žito
 }
 
 struct ContentView: View {
@@ -80,6 +165,9 @@ struct ContentView: View {
     @State private var showGrid = true
     @State private var handPanMode = false
     @State private var showPivotIndicator = false
+    @State private var showSettingsPopover = false
+    /// resources = drvo, kamen, željezo; food = kruh, hmelj, žito
+    @State private var resourceStripMode: ResourceStripMode = .resources
 
     var body: some View {
         ZStack {
@@ -91,26 +179,45 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea()
 
-            // Dno: jedan obli kvadrat od brušenog stakla s ikonama unutra
+            // Dno: sivi zaobljeni okvir s ikonama (castle, sword, mine, farm, food)
             VStack {
                 Spacer()
-                HStack(spacing: 20) {
+                HStack(spacing: 24) {
                     Button { showMinijatureWall = true } label: { BarIcon(assetName: "castle", systemName: "building.columns.fill") }
                     .buttonStyle(.plain)
                     Button { } label: { BarIcon(assetName: "sword", systemName: "crossed.swords") }
+                    .buttonStyle(.plain)
+                    Button { } label: { BarIcon(assetName: "mine", systemName: "hammer.fill") }
                     .buttonStyle(.plain)
                     Button { } label: { BarIcon(assetName: "farm", systemName: "leaf.fill") }
                     .buttonStyle(.plain)
                     Button { } label: { BarIcon(assetName: "food", systemName: "fork.knife") }
                     .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 14)
+                .padding(.horizontal, 28)
+                .padding(.vertical, 18)
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
                 .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.25), lineWidth: 1))
                 .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 4)
                 .padding(.bottom, 28)
             }
+
+            // Zoom – donji lijevi kut, da vidiš koliko je zumirano
+            VStack {
+                Spacer()
+                HStack {
+                    Text("Zoom \(String(format: "%.1f×", gameState.mapCameraSettings.currentZoom))")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 6))
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, 16)
+                .padding(.bottom, 100)
+            }
+            .allowsHitTesting(false)
 
             // HUD – jedna traka gore: Kamera | Postavljanje | Resursi | Izlaz
             VStack(spacing: 0) {
@@ -157,67 +264,37 @@ struct ContentView: View {
             HStack {
                 Spacer(minLength: 0)
                 HStack(spacing: 16) {
-                    // Zum
-                    HStack(spacing: 6) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.8))
-                        Text("Zum")
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.85))
-                        Slider(
-                            value: Binding(
-                                get: { gameState.mapCameraSettings.currentZoom },
-                                set: { new in
-                                    var s = gameState.mapCameraSettings
-                                    s.currentZoom = min(s.zoomMax, max(s.zoomMin, new))
-                                    gameState.mapCameraSettings = s
-                                }
-                            ),
-                            in: gameState.mapCameraSettings.zoomMin ... gameState.mapCameraSettings.zoomMax
-                        )
-                        .frame(maxWidth: 100)
-                        Text(String(format: "%.1f×", gameState.mapCameraSettings.currentZoom))
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.9))
-                            .frame(width: 24, alignment: .trailing)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .frame(height: 32)
-                    .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
-                    .frame(maxWidth: 160)
+                    // Zoom – 4 faze (ostaje na traci)
+                    ZoomPhaseView(mapCameraSettings: Binding(
+                        get: { gameState.mapCameraSettings },
+                        set: { gameState.mapCameraSettings = $0 }
+                    ))
 
                     hudDivider
 
-                    // Ruka – klik i povlačenje pomiče kameru
-                    Button {
-                        handPanMode.toggle()
-                    } label: {
-                        Image(systemName: handPanMode ? "hand.draw.fill" : "hand.draw")
-                            .font(.caption)
-                            .foregroundStyle(handPanMode ? .yellow : .white.opacity(0.9))
+                    // Gear (manje), Foodbottun, Weapons, Resources (veće)
+                    HStack(spacing: 10) {
+                        Button {
+                            showSettingsPopover.toggle()
+                        } label: {
+                            hudIconImage("gear", fallback: "gearshape.fill", size: 26)
+                        }
+                        .buttonStyle(.plain)
+                        .popover(isPresented: $showSettingsPopover, arrowEdge: .bottom) {
+                            settingsPopoverContent
+                        }
+                        .help("Postavke kamere i prikaza")
+                        Button { resourceStripMode = .food } label: { hudIconImage("foodbottun", fallback: "fork.knife", size: 48).scaleEffect(1.5) }
+                        .buttonStyle(.plain)
+                        Button { } label: { hudIconImage("weapons", fallback: "crossed.swords", size: 48).scaleEffect(1.5) }
+                        .buttonStyle(.plain)
+                        Button { resourceStripMode = .resources } label: { hudIconImage("resources", fallback: "square.stack.3d.up.fill", size: 48).scaleEffect(1.5) }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.bordered)
-                    .tint(handPanMode ? .yellow.opacity(0.3) : .white.opacity(0.15))
 
                     hudDivider
 
-                    // Pivot – prikaži gdje kamera gleda (točka u koju se orbita vrti)
-                    Button {
-                        showPivotIndicator.toggle()
-                    } label: {
-                        Image(systemName: showPivotIndicator ? "scope" : "scope")
-                            .font(.caption)
-                            .foregroundStyle(showPivotIndicator ? .yellow : .white.opacity(0.8))
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(showPivotIndicator ? .yellow.opacity(0.4) : .white.opacity(0.15))
-                    .help("Prikaži pivot (gdje kamera gleda)")
-
-                    hudDivider
-
-                    // Kamera – 3D kocka sa stranama svijeta (klik za rotaciju 90°)
+                    // Kamera – kompas (rotacija 90°)
                     CompassCubeView(
                         mapRotation: Binding(
                             get: { gameState.mapCameraSettings.mapRotation },
@@ -239,51 +316,34 @@ struct ContentView: View {
 
                     hudDivider
 
-                    // Ćelije
-                    HStack(spacing: 6) {
-                        Toggle(isOn: $showGrid) {
-                            Text("Ćelije")
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.85))
+                    // Resursi: Resources botun = drvo, kamen, željezo; Food botun = kruh, hmelj, žito
+                    HStack(spacing: 12) {
+                        if resourceStripMode == .resources {
+                            ResourceRow(iconName: "wood", value: gameState.wood)
+                            ResourceRow(iconName: "stone", value: gameState.stone, iconSize: 52)
+                            ResourceRow(iconName: "iron", value: gameState.iron, iconSize: 52)
+                        } else {
+                            ResourceRow(iconName: "bread", value: gameState.food)
+                            ResourceRow(iconName: "hop", value: gameState.hop)
+                            ResourceRow(iconName: "hay", value: gameState.hay)
                         }
-                        .toggleStyle(.switch)
-                        .scaleEffect(0.8)
-                        .labelsHidden()
-                        Text("Ćelije")
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.75))
                     }
-
-                    hudDivider
-
-                    if gameState.gold > 0 || gameState.food > 0 {
-                        HStack(spacing: 8) {
-                            Label("\(gameState.gold)", systemImage: "dollarsign.circle.fill")
-                            Label("\(gameState.food)", systemImage: "leaf.fill")
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.white)
-                        hudDivider
-                    }
-
-                    Button {
-                        gameState.showMainMenu()
-                    } label: {
-                        Label("Izlaz", systemImage: "rectangle.portrait.and.arrow.right")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.white.opacity(0.15))
-                    .foregroundStyle(.white)
+                    .id(resourceStripMode)
+                    .transition(.asymmetric(
+                        insertion: .opacity.animation(.easeOut(duration: 0.22)).combined(with: .scale(scale: 0.92)),
+                        removal: .opacity.animation(.easeIn(duration: 0.18)).combined(with: .scale(scale: 0.96))
+                    ))
+                    .animation(.easeInOut(duration: 0.25), value: resourceStripMode)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
-                .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: 2)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 0)
+                .frame(width: 1100, height: 52)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 1)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 24)
-            .padding(.top, 12)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
 
             Text("WASD pomicanje  ·  +/− zoom")
                 .font(.caption2)
@@ -293,10 +353,79 @@ struct ContentView: View {
         }
     }
 
+    /// Mini prozor iz gear gumba: Ruka, Pivot, Ćelije (sukladno temi). Zoom ostaje na traci.
+    private var settingsPopoverContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Kamera i prikaz")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.95))
+            Divider().background(.white.opacity(0.3))
+            HStack(spacing: 8) {
+                Button {
+                    handPanMode.toggle()
+                } label: {
+                    Label(handPanMode ? "Ruka uklj." : "Ruka", systemImage: handPanMode ? "hand.draw.fill" : "hand.draw")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .tint(handPanMode ? .yellow.opacity(0.4) : .white.opacity(0.2))
+                .foregroundStyle(handPanMode ? .yellow : .white.opacity(0.9))
+                Button {
+                    showPivotIndicator.toggle()
+                } label: {
+                    Label(showPivotIndicator ? "Pivot uklj." : "Pivot", systemImage: "scope")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .tint(showPivotIndicator ? .yellow.opacity(0.4) : .white.opacity(0.2))
+                .foregroundStyle(showPivotIndicator ? .yellow : .white.opacity(0.9))
+            }
+            HStack(spacing: 8) {
+                Text("Ćelije")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.9))
+                Toggle("", isOn: $showGrid)
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+            }
+            Divider().background(.white.opacity(0.3))
+            Button {
+                showSettingsPopover = false
+                gameState.showMainMenu()
+            } label: {
+                Label("Izlaz", systemImage: "rectangle.portrait.and.arrow.right")
+                    .font(.caption)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .tint(.white.opacity(0.15))
+            .foregroundStyle(.white)
+        }
+        .frame(width: 200)
+        .padding(14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    /// Ikona za HUD: iz Icons/*.png ili SF Symbol. size: veličina u pt (zadnje dvije veće).
+    private func hudIconImage(_ name: String, fallback systemName: String, size: CGFloat = 22) -> some View {
+        Group {
+            if let img = loadBarIcon(named: name) {
+                Image(nsImage: img)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                Image(systemName: systemName)
+                    .font(.system(size: size * 0.64))
+            }
+        }
+        .frame(width: size, height: size)
+        .foregroundStyle(.white.opacity(0.9))
+    }
+
     private var hudDivider: some View {
         Rectangle()
             .fill(.white.opacity(0.2))
-            .frame(width: 1, height: 20)
+            .frame(width: 1, height: 6)
     }
 
     /// Minijaturni prikaz zida – otvara se klikom na ikonu dvora u sredini.
