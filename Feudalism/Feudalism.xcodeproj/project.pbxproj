@@ -1,0 +1,573 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXContainerItemProxy section */
+		F0DDE3592F49808C00D1017C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F0DDE3392F49808C00D1017C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F0DDE3402F49808C00D1017C;
+			remoteInfo = Feudalism;
+		};
+		F0DDE3632F49808C00D1017C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F0DDE3392F49808C00D1017C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F0DDE3402F49808C00D1017C;
+			remoteInfo = Feudalism;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		F0DDE3412F49808C00D1017C /* Feudalism.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Feudalism.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F0DDE3582F49808C00D1017C /* FeudalismTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FeudalismTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F0DDE3622F49808C00D1017C /* FeudalismUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FeudalismUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		F0DDE3432F49808C00D1017C /* Feudalism */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Feudalism;
+			sourceTree = "<group>";
+		};
+		F0DDE35B2F49808C00D1017C /* FeudalismTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = FeudalismTests;
+			sourceTree = "<group>";
+		};
+		F0DDE3652F49808C00D1017C /* FeudalismUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = FeudalismUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		F0DDE33E2F49808C00D1017C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F0DDE3552F49808C00D1017C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F0DDE35F2F49808C00D1017C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		F0DDE3382F49808C00D1017C = {
+			isa = PBXGroup;
+			children = (
+				F0DDE3432F49808C00D1017C /* Feudalism */,
+				F0DDE35B2F49808C00D1017C /* FeudalismTests */,
+				F0DDE3652F49808C00D1017C /* FeudalismUITests */,
+				F0DDE3422F49808C00D1017C /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		F0DDE3422F49808C00D1017C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				F0DDE3412F49808C00D1017C /* Feudalism.app */,
+				F0DDE3582F49808C00D1017C /* FeudalismTests.xctest */,
+				F0DDE3622F49808C00D1017C /* FeudalismUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		F0DDE3402F49808C00D1017C /* Feudalism */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F0DDE36C2F49808C00D1017C /* Build configuration list for PBXNativeTarget "Feudalism" */;
+			buildPhases = (
+				F0DDE33D2F49808C00D1017C /* Sources */,
+				F0DDE33E2F49808C00D1017C /* Frameworks */,
+				F0DDE33F2F49808C00D1017C /* Resources */,
+				F0DDE37A2F49808C00D1017C /* Copy Wall model + texture */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				F0DDE3432F49808C00D1017C /* Feudalism */,
+			);
+			name = Feudalism;
+			packageProductDependencies = (
+			);
+			productName = Feudalism;
+			productReference = F0DDE3412F49808C00D1017C /* Feudalism.app */;
+			productType = "com.apple.product-type.application";
+		};
+		F0DDE3572F49808C00D1017C /* FeudalismTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F0DDE36F2F49808C00D1017C /* Build configuration list for PBXNativeTarget "FeudalismTests" */;
+			buildPhases = (
+				F0DDE3542F49808C00D1017C /* Sources */,
+				F0DDE3552F49808C00D1017C /* Frameworks */,
+				F0DDE3562F49808C00D1017C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F0DDE35A2F49808C00D1017C /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				F0DDE35B2F49808C00D1017C /* FeudalismTests */,
+			);
+			name = FeudalismTests;
+			packageProductDependencies = (
+			);
+			productName = FeudalismTests;
+			productReference = F0DDE3582F49808C00D1017C /* FeudalismTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		F0DDE3612F49808C00D1017C /* FeudalismUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F0DDE3722F49808C00D1017C /* Build configuration list for PBXNativeTarget "FeudalismUITests" */;
+			buildPhases = (
+				F0DDE35E2F49808C00D1017C /* Sources */,
+				F0DDE35F2F49808C00D1017C /* Frameworks */,
+				F0DDE3602F49808C00D1017C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F0DDE3642F49808C00D1017C /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				F0DDE3652F49808C00D1017C /* FeudalismUITests */,
+			);
+			name = FeudalismUITests;
+			packageProductDependencies = (
+			);
+			productName = FeudalismUITests;
+			productReference = F0DDE3622F49808C00D1017C /* FeudalismUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		F0DDE3392F49808C00D1017C /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1620;
+				LastUpgradeCheck = 1620;
+				TargetAttributes = {
+					F0DDE3402F49808C00D1017C = {
+						CreatedOnToolsVersion = 16.2;
+					};
+					F0DDE3572F49808C00D1017C = {
+						CreatedOnToolsVersion = 16.2;
+						TestTargetID = F0DDE3402F49808C00D1017C;
+					};
+					F0DDE3612F49808C00D1017C = {
+						CreatedOnToolsVersion = 16.2;
+						TestTargetID = F0DDE3402F49808C00D1017C;
+					};
+				};
+			};
+			buildConfigurationList = F0DDE33C2F49808C00D1017C /* Build configuration list for PBXProject "Feudalism" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = F0DDE3382F49808C00D1017C;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = F0DDE3422F49808C00D1017C /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				F0DDE3402F49808C00D1017C /* Feudalism */,
+				F0DDE3572F49808C00D1017C /* FeudalismTests */,
+				F0DDE3612F49808C00D1017C /* FeudalismUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		F0DDE33F2F49808C00D1017C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F0DDE3562F49808C00D1017C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F0DDE3602F49808C00D1017C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		F0DDE37A2F49808C00D1017C /* Copy Wall model + texture */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Feudalism/Core/Objects/Wall/Wall/Meshy_AI_Stone_Wall_0221071847_texture.obj",
+				"$(SRCROOT)/Feudalism/Core/Objects/Wall/Wall/Meshy_AI_Stone_Wall_0221071847_texture.mtl",
+				"$(SRCROOT)/Feudalism/Core/Objects/Wall/Wall/Meshy_AI_Stone_Wall_0221071847_texture.png",
+			);
+			name = "Copy Wall model + texture";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\n# WRAPPER_NAME = Feudalism.app, TARGET_BUILD_DIR = .../Debug\nRES=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources\"\nmkdir -p \"$RES/Feudalism/Core/Objects/Wall/Wall\"\nmkdir -p \"$RES/Wall\"\nSRC=\"${SRCROOT}/Feudalism/Core/Objects/Wall/Wall\"\ncp \"$SRC/\"*.obj \"$RES/Feudalism/Core/Objects/Wall/Wall/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$RES/Feudalism/Core/Objects/Wall/Wall/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$RES/Feudalism/Core/Objects/Wall/Wall/\" 2>/dev/null || true\ncp \"$SRC/\"*.obj \"$RES/Wall/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$RES/Wall/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$RES/Wall/\" 2>/dev/null || true\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		F0DDE33D2F49808C00D1017C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F0DDE3542F49808C00D1017C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F0DDE35E2F49808C00D1017C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		F0DDE35A2F49808C00D1017C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F0DDE3402F49808C00D1017C /* Feudalism */;
+			targetProxy = F0DDE3592F49808C00D1017C /* PBXContainerItemProxy */;
+		};
+		F0DDE3642F49808C00D1017C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F0DDE3402F49808C00D1017C /* Feudalism */;
+			targetProxy = F0DDE3632F49808C00D1017C /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		F0DDE36A2F49808C00D1017C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.2;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		F0DDE36B2F49808C00D1017C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.2;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		F0DDE36D2F49808C00D1017C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Feudalism/Feudalism.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Q8997N27J9;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = TomaPrivate.Feudalism;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		F0DDE36E2F49808C00D1017C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Feudalism/Feudalism.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Q8997N27J9;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = TomaPrivate.Feudalism;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		F0DDE3702F49808C00D1017C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Q8997N27J9;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = TomaPrivate.FeudalismTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Feudalism.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Feudalism";
+			};
+			name = Debug;
+		};
+		F0DDE3712F49808C00D1017C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Q8997N27J9;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = TomaPrivate.FeudalismTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Feudalism.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Feudalism";
+			};
+			name = Release;
+		};
+		F0DDE3732F49808C00D1017C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Q8997N27J9;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = TomaPrivate.FeudalismUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = Feudalism;
+			};
+			name = Debug;
+		};
+		F0DDE3742F49808C00D1017C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Q8997N27J9;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = TomaPrivate.FeudalismUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = Feudalism;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		F0DDE33C2F49808C00D1017C /* Build configuration list for PBXProject "Feudalism" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F0DDE36A2F49808C00D1017C /* Debug */,
+				F0DDE36B2F49808C00D1017C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F0DDE36C2F49808C00D1017C /* Build configuration list for PBXNativeTarget "Feudalism" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F0DDE36D2F49808C00D1017C /* Debug */,
+				F0DDE36E2F49808C00D1017C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F0DDE36F2F49808C00D1017C /* Build configuration list for PBXNativeTarget "FeudalismTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F0DDE3702F49808C00D1017C /* Debug */,
+				F0DDE3712F49808C00D1017C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F0DDE3722F49808C00D1017C /* Build configuration list for PBXNativeTarget "FeudalismUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F0DDE3732F49808C00D1017C /* Debug */,
+				F0DDE3742F49808C00D1017C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = F0DDE3392F49808C00D1017C /* Project object */;
+}
