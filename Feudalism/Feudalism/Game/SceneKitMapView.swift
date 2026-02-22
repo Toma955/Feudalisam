@@ -194,6 +194,7 @@ struct SceneKitMapView: NSViewRepresentable {
     @EnvironmentObject private var gameState: GameState
     var showGrid: Bool = true
     @Binding var handPanMode: Bool
+    var showPivotIndicator: Bool = false
     var isEraseMode: Bool = false
     var onRemoveAt: ((Int, Int) -> Void)?
     var isPlaceMode: Bool { gameState.selectedPlacementObjectId != nil }
@@ -223,7 +224,9 @@ struct SceneKitMapView: NSViewRepresentable {
 
         let scene = SCNScene()
 
-        // Mapa: teren, grid, placements – direktno u root, NIKAD se ne pomiče (samo kamera putuje)
+        // Mapa: teren, grid, placements – FIKSNI u sceni, NIKAD im ne mijenjamo position/rotation (samo u makeNSView)
+        scene.rootNode.position = SCNVector3Zero
+        scene.rootNode.eulerAngles = SCNVector3Zero
         let plane = SCNPlane(width: mapWorldW, height: mapWorldH)
         let terrainMat = SCNMaterial()
         terrainMat.diffuse.contents = makeTerrainTexture()
@@ -238,11 +241,15 @@ struct SceneKitMapView: NSViewRepresentable {
 
         let gridNode = SCNNode()
         gridNode.name = "grid"
+        gridNode.position = SCNVector3Zero
+        gridNode.eulerAngles = SCNVector3Zero
         refreshGrid(gridNode: gridNode, zoom: gameState.mapCameraSettings.currentZoom)
         scene.rootNode.addChildNode(gridNode)
 
         let placementsNode = SCNNode()
         placementsNode.name = "placements"
+        placementsNode.position = SCNVector3Zero
+        placementsNode.eulerAngles = SCNVector3Zero
         scene.rootNode.addChildNode(placementsNode)
 
         // Samo kamera (i njen target) se pomiče pri panu; mapa je fiksna u sceni
@@ -256,8 +263,16 @@ struct SceneKitMapView: NSViewRepresentable {
         cameraTarget.name = "cameraTarget"
         cameraTarget.position = SCNVector3(0, 0, 0)
         scene.rootNode.addChildNode(cameraTarget)
+
+        let pivotIndicator = makePivotIndicatorNode()
+        pivotIndicator.name = "pivotIndicator"
+        scene.rootNode.addChildNode(pivotIndicator)
+
         scene.rootNode.addChildNode(cameraNode)
-        cameraNode.constraints = [SCNLookAtConstraint(target: cameraTarget)]
+        let lookAt = SCNLookAtConstraint(target: cameraTarget)
+        lookAt.isGimbalLockEnabled = true
+        lookAt.worldUp = SCNVector3(0, 1, 0)
+        cameraNode.constraints = [lookAt]
         scnView.pointOfView = cameraNode
 
         let light = SCNNode()
@@ -276,6 +291,7 @@ struct SceneKitMapView: NSViewRepresentable {
         context.coordinator.placementsNode = placementsNode
         context.coordinator.cameraNode = cameraNode
         context.coordinator.cameraTarget = cameraTarget
+        context.coordinator.pivotIndicatorNode = pivotIndicator
         context.coordinator.gridNode = gridNode
         context.coordinator.lastGridZoom = CGFloat(gameState.mapCameraSettings.currentZoom)
 
@@ -330,9 +346,18 @@ struct SceneKitMapView: NSViewRepresentable {
         container.hasObjectSelected = isPlaceMode
 
         let coord = context.coordinator
+        // Mapa (rootNode, teren, grid, placements) se NIKAD ne dira – samo kamera i target.
 
         if let cam = coord.cameraNode, let target = coord.cameraTarget {
             applyCamera(cameraNode: cam, targetNode: target, settings: gameState.mapCameraSettings)
+        }
+        if let pivot = coord.pivotIndicatorNode {
+            pivot.position = coord.cameraTarget?.position ?? SCNVector3(
+                gameState.mapCameraSettings.panOffset.x,
+                0,
+                gameState.mapCameraSettings.panOffset.y
+            )
+            pivot.isHidden = !showPivotIndicator
         }
         if let grid = coord.gridNode {
             grid.isHidden = !showGrid
@@ -346,20 +371,48 @@ struct SceneKitMapView: NSViewRepresentable {
         refreshPlacements(coord.placementsNode, placements: gameState.gameMap.placements)
     }
 
-    /// Samo kamera se pomiče (target + pozicija). Mapa nema vlastiti čvor – teren/grid/placements su u root i ne diraju se.
+    /// Vizualni čvor na mjestu pivota (gdje kamera gleda) – mali disk + križ.
+    private func makePivotIndicatorNode() -> SCNNode {
+        let container = SCNNode()
+        let radius: CGFloat = 120
+        let cyl = SCNCylinder(radius: radius, height: 4)
+        cyl.firstMaterial?.diffuse.contents = NSColor.systemYellow
+        cyl.firstMaterial?.emission.contents = NSColor.systemYellow.withAlphaComponent(0.5)
+        cyl.firstMaterial?.isDoubleSided = true
+        cyl.firstMaterial?.lightingModel = .constant
+        let disk = SCNNode(geometry: cyl)
+        disk.position = SCNVector3(0, 2, 0)
+        disk.eulerAngles.x = -.pi / 2
+        container.addChildNode(disk)
+        let barW: CGFloat = 8
+        let barLen: CGFloat = radius * 1.6
+        let bar = SCNBox(width: barLen, height: barW, length: barW, chamferRadius: 0)
+        bar.firstMaterial?.diffuse.contents = NSColor.systemYellow
+        bar.firstMaterial?.lightingModel = .constant
+        let h = SCNNode(geometry: bar)
+        h.position = SCNVector3(0, 4, 0)
+        container.addChildNode(h)
+        let v = SCNNode(geometry: bar)
+        v.position = SCNVector3(0, 4, 0)
+        v.eulerAngles.z = .pi / 2
+        container.addChildNode(v)
+        return container
+    }
+
+    /// Samo kamera i target se pomiču. Mapa se NIKAD ne dira.
+    /// Kamera: orbita na visini h, radius h, uvijek gleda pivot; 4 strane = puni krug 360°.
     private func applyCamera(cameraNode: SCNNode, targetNode: SCNNode, settings: MapCameraSettings) {
         let baseHeight: CGFloat = 2800
         let h = baseHeight / settings.currentZoom
         let px = settings.panOffset.x
         let pz = settings.panOffset.y
         let rot = CGFloat(-settings.mapRotation)
-        let tilt = CGFloat(settings.tiltAngle)
-        let backDist = h * tan(tilt)
+        let orbitRadius = h
         targetNode.position = SCNVector3(px, 0, pz)
         cameraNode.position = SCNVector3(
-            px + sin(rot) * backDist,
+            px + sin(rot) * orbitRadius,
             h,
-            pz + cos(rot) * backDist
+            pz + cos(rot) * orbitRadius
         )
     }
 
@@ -395,6 +448,7 @@ struct SceneKitMapView: NSViewRepresentable {
         var placementsNode: SCNNode?
         var cameraNode: SCNNode?
         var cameraTarget: SCNNode?
+        var pivotIndicatorNode: SCNNode?
         var gridNode: SCNNode?
         var lastGridZoom: CGFloat = 1
     }

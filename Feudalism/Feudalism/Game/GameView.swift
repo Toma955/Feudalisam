@@ -197,10 +197,14 @@ struct GameView: NSViewRepresentable {
             s.currentZoom = min(gameState.mapCameraSettings.zoomMax, max(gameState.mapCameraSettings.zoomMin, s.currentZoom + delta))
             gameState.mapCameraSettings = s
         }
-        scene.onPanChange = { [gameState] delta in
+        scene.onPanChange = { [gameState] screenDelta in
             var s = gameState.mapCameraSettings
-            s.panOffset.x += delta.x
-            s.panOffset.y += delta.y
+            let z = max(0.001, s.currentZoom)
+            let a = s.mapRotation
+            let dx = (screenDelta.x * cos(-a) - screenDelta.y * sin(-a)) / z
+            let dy = (screenDelta.x * sin(-a) + screenDelta.y * cos(-a)) / z
+            s.panOffset.x -= dx
+            s.panOffset.y -= dy
             gameState.mapCameraSettings = s
         }
         scene.onCornerPositionsInView = { [weak overlay] points, viewSize in
@@ -249,10 +253,14 @@ struct GameView: NSViewRepresentable {
             wrapper.pillarOverlay?.tiltAngle = gameState.mapCameraSettings.tiltAngle
             wrapper.pillarOverlay?.setNeedsDisplay(wrapper.pillarOverlay?.bounds ?? .zero)
         }
-        scene.onPanChange = { [gameState] delta in
+        scene.onPanChange = { [gameState] screenDelta in
             var s = gameState.mapCameraSettings
-            s.panOffset.x += delta.x
-            s.panOffset.y += delta.y
+            let z = max(0.001, s.currentZoom)
+            let a = s.mapRotation
+            let dx = (screenDelta.x * cos(-a) - screenDelta.y * sin(-a)) / z
+            let dy = (screenDelta.x * sin(-a) + screenDelta.y * cos(-a)) / z
+            s.panOffset.x -= dx
+            s.panOffset.y -= dy
             gameState.mapCameraSettings = s
         }
         scene.selectedObjectId = gameState.selectedPlacementObjectId

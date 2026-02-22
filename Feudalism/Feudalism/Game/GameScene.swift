@@ -42,6 +42,11 @@ final class GameScene: SKScene {
     private var gridBuildContainer: SKNode?
     private var gridBuildAction: SKAction?
 
+    /// Pivot u centru mape – rotacija se primjenjuje na njega; kamera je dijete, pan je offset od pivota.
+    private let cameraPivot = SKNode()
+    /// Kamera – dijete pivot čvora; zumira se ovdje, rotacija je na pivotu.
+    private let cam = SKCameraNode()
+
     /// Postavke kamere (zoom, nagib, brzina) – iz postavki; primjenjuje se pri buildu i može se ažurirati.
     var cameraSettings: MapCameraSettings = MapCameraSettings() {
         didSet { applyCameraToMap() }
@@ -92,6 +97,9 @@ final class GameScene: SKScene {
             let safeSize = CGSize(width: size.width > 0 ? size.width : 1024, height: size.height > 0 ? size.height : 768)
             if size.width <= 0 || size.height <= 0 { size = safeSize }
         }
+        camera = cam
+        addChild(cameraPivot)
+        cameraPivot.addChild(cam)
         setupMapGrid()
         setupGhostWall()
         updateGridVisibility()
@@ -117,14 +125,25 @@ final class GameScene: SKScene {
     /// Ažurira prikaz kamere (poziva se i kad se view resizea). Javno da ga GameView može pozvati.
     func refreshCamera() { applyCameraToMap() }
 
-    /// Primjena zoom, pomaka i rotacije na mapu. Mapa fiksne veličine – zoom = fit × currentZoom, pan bez ograničenja.
+    /// Primjena zoom, pomaka i rotacije: pivot u centru mape, rotacija na pivotu, kamera kao dijete (pan = offset).
     private func applyCameraToMap() {
         guard let map = mapNode else { return }
-        let p = cameraSettings.panOffset
-        map.position = CGPoint(x: size.width / 2 + p.x, y: size.height / 2 + p.y)
         let fitScale = min(size.width / totalMapW, size.height / totalMapH)
-        map.setScale(fitScale * cameraSettings.currentZoom)
-        map.zRotation = -cameraSettings.mapRotation
+        map.position = CGPoint(x: size.width / 2, y: size.height / 2)
+        map.setScale(fitScale)
+        map.zRotation = 0
+        let cx = size.width / 2
+        let cy = size.height / 2
+        cameraPivot.position = CGPoint(x: cx, y: cy)
+        cameraPivot.zRotation = cameraSettings.mapRotation
+        let p = cameraSettings.panOffset
+        let r = cameraSettings.mapRotation
+        cam.position = CGPoint(
+            x: p.x * cos(-r) - p.y * sin(-r),
+            y: p.x * sin(-r) + p.y * cos(-r)
+        )
+        cam.zRotation = 0
+        cam.setScale(1.0 / max(0.001, cameraSettings.currentZoom))
         updateCornerVerticalPositions()
     }
 

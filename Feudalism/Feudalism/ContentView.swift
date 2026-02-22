@@ -79,6 +79,7 @@ struct ContentView: View {
     @State private var showMinijatureWall = false
     @State private var showGrid = true
     @State private var handPanMode = false
+    @State private var showPivotIndicator = false
 
     var body: some View {
         ZStack {
@@ -86,7 +87,7 @@ struct ContentView: View {
             Color.white.ignoresSafeArea()
 
             // Puni zaslon – 3D mapa (SceneKit): teren, rešetka, kamera s nagibom, zoom, pan
-            SceneKitMapView(showGrid: showGrid, handPanMode: $handPanMode)
+            SceneKitMapView(showGrid: showGrid, handPanMode: $handPanMode, showPivotIndicator: showPivotIndicator)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea()
 
@@ -183,6 +184,7 @@ struct ContentView: View {
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
+                    .frame(height: 32)
                     .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
                     .frame(maxWidth: 160)
 
@@ -201,39 +203,39 @@ struct ContentView: View {
 
                     hudDivider
 
-                    // Kamera – 3D kocka sa stranama svijeta (povuci za rotaciju i nagib)
-                    HStack(spacing: 8) {
-                        CompassCubeView(
-                            mapRotation: Binding(
-                                get: { gameState.mapCameraSettings.mapRotation },
-                                set: { new in
-                                    var s = gameState.mapCameraSettings
-                                    s.mapRotation = new
-                                    gameState.mapCameraSettings = s
-                                }
-                            ),
-                            tiltAngle: Binding(
-                                get: { gameState.mapCameraSettings.tiltAngle },
-                                set: { new in
-                                    var s = gameState.mapCameraSettings
-                                    s.tiltAngle = min(MapCameraSettings.tiltMax, max(MapCameraSettings.tiltMin, new))
-                                    gameState.mapCameraSettings = s
-                                }
-                            ),
-                            panOffset: Binding(
-                                get: { gameState.mapCameraSettings.panOffset },
-                                set: { new in
-                                    var s = gameState.mapCameraSettings
-                                    s.panOffset = new
-                                    gameState.mapCameraSettings = s
-                                }
-                            )
-                        )
-                        Text("\(Int(round(gameState.mapCameraSettings.tiltAngle * 180 / .pi)))°")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.8))
-                            .frame(width: 22, alignment: .leading)
+                    // Pivot – prikaži gdje kamera gleda (točka u koju se orbita vrti)
+                    Button {
+                        showPivotIndicator.toggle()
+                    } label: {
+                        Image(systemName: showPivotIndicator ? "scope" : "scope")
+                            .font(.caption)
+                            .foregroundStyle(showPivotIndicator ? .yellow : .white.opacity(0.8))
                     }
+                    .buttonStyle(.bordered)
+                    .tint(showPivotIndicator ? .yellow.opacity(0.4) : .white.opacity(0.15))
+                    .help("Prikaži pivot (gdje kamera gleda)")
+
+                    hudDivider
+
+                    // Kamera – 3D kocka sa stranama svijeta (klik za rotaciju 90°)
+                    CompassCubeView(
+                        mapRotation: Binding(
+                            get: { gameState.mapCameraSettings.mapRotation },
+                            set: { new in
+                                var s = gameState.mapCameraSettings
+                                s.mapRotation = new
+                                gameState.mapCameraSettings = s
+                            }
+                        ),
+                        panOffset: Binding(
+                            get: { gameState.mapCameraSettings.panOffset },
+                            set: { new in
+                                var s = gameState.mapCameraSettings
+                                s.panOffset = new
+                                gameState.mapCameraSettings = s
+                            }
+                        )
+                    )
 
                     hudDivider
 
@@ -283,7 +285,7 @@ struct ContentView: View {
             .padding(.horizontal, 24)
             .padding(.top, 12)
 
-            Text("↑↓ nagib  ·  WASD pomicanje  ·  +/− zoom")
+            Text("WASD pomicanje  ·  +/− zoom")
                 .font(.caption2)
                 .foregroundStyle(.white.opacity(0.5))
                 .padding(.top, 6)

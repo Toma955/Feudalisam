@@ -2,165 +2,139 @@
 //  CompassCubeView.swift
 //  Feudalism
 //
-//  3D kocka sa stranama svijeta (N/S/E/W) – povlačenjem se rotira kamera po mapi (kao Udemy/Unreal).
+//  Horizontalni kompas: strip N | E | S | W s vertikalnim linijama. Klik bilo gdje = mehanizam klizi.
 //
 
 import SwiftUI
-import SceneKit
 import AppKit
 
-/// SceneKit prikaz kocke s oznakama strana; rotacija se sinkronizira s bindingom.
-private final class CompassCubeScene {
-    let scene = SCNScene()
-    let boxNode: SCNNode
-    private let boxSize: CGFloat = 1.2
+private let cardinals = ["N", "E", "S", "W"]
 
-    init() {
-        let box = SCNBox(width: boxSize, height: boxSize, length: boxSize, chamferRadius: 0.08)
-        // SCNBox materijali: [front (+Z), right (+X), back (-Z), left (-X), top (+Y), bottom (-Y)]
-        // Stranice svijeta: front = Sjever (N), right = Istok (E), back = Jug (S), left = Zapad (W)
-        let n = Self.material(color: NSColor(red: 0.85, green: 0.35, blue: 0.3, alpha: 1))   // N – crvenkasto
-        let e = Self.material(color: NSColor(red: 0.35, green: 0.75, blue: 0.4, alpha: 1))  // E – zeleno
-        let s = Self.material(color: NSColor(red: 0.3, green: 0.45, blue: 0.9, alpha: 1))    // S – plavo
-        let w = Self.material(color: NSColor(red: 0.9, green: 0.65, blue: 0.2, alpha: 1))     // W – narančasto
-        let top = Self.material(color: NSColor.white.withAlphaComponent(0.9))
-        let bottom = Self.material(color: NSColor(white: 0.25, alpha: 1))
-        box.materials = [n, e, s, w, top, bottom]
+/// Iz mapRotation (radijani) vraća indeks 0–3 (N=0, E=1, S=2, W=3).
+private func cardinalIndex(from rotation: CGFloat) -> Int {
+    let twoPi = 2 * CGFloat.pi
+    var r = rotation
+    while r < 0 { r += twoPi }
+    while r >= twoPi { r -= twoPi }
+    let idx = Int((r + .pi / 4) / (.pi / 2)) % 4
+    return idx < 0 ? idx + 4 : idx
+}
 
-        boxNode = SCNNode(geometry: box)
-        boxNode.name = "compassBox"
-        scene.rootNode.addChildNode(boxNode)
+/// Kontinuirana pozicija 0..<5 za glatko klizanje u krug (0=N, 1=E, 2=S, 3=W, 4=N opet). Ne normaliziramo na 2π da W→N ostane na 4.
+private func continuousPosition(from rotation: CGFloat) -> CGFloat {
+    let twoPi = 2 * CGFloat.pi
+    var r = rotation
+    while r < 0 { r += twoPi }
+    if r >= twoPi { r = twoPi }
+    return r / (.pi / 2)
+}
 
-        let cameraNode = SCNNode()
-        cameraNode.camera = SCNCamera()
-        cameraNode.camera?.zNear = 0.01
-        cameraNode.camera?.zFar = 100
-        cameraNode.camera?.usesOrthographicProjection = true
-        cameraNode.camera?.orthographicScale = 1.4
-        cameraNode.position = SCNVector3(0, 0, 3.2)
-        cameraNode.look(at: SCNVector3(0, 0, 0))
-        scene.rootNode.addChildNode(cameraNode)
+/// Točno 9 vertikalnih crtica između slova (oblik "|" – visoke, uske linije).
+private struct NineDashes: View {
+    private let count = 9
+    private let dashWidth: CGFloat = 1.5
+    private let gap: CGFloat = 1.2
+    private let rowHeight: CGFloat = 32
 
-        let light = SCNNode()
-        light.light = SCNLight()
-        light.light?.type = .omni
-        light.light?.intensity = 800
-        light.position = SCNVector3(2, 2, 4)
-        scene.rootNode.addChildNode(light)
-
-        let amb = SCNNode()
-        amb.light = SCNLight()
-        amb.light?.type = .ambient
-        amb.light?.intensity = 300
-        scene.rootNode.addChildNode(amb)
-    }
-
-    private static func material(color: NSColor) -> SCNMaterial {
-        let m = SCNMaterial()
-        m.diffuse.contents = color
-        m.locksAmbientWithDiffuse = true
-        return m
-    }
-
-    /// Rotacija kocke: mapRotation iz kamere mape. Stranica prema kameri = smjer u koji gledamo na mapi.
-    /// Kad mapRotation = 0, kamera gleda prema -Z (jug) → na kocki prema kameri treba biti S (+ π).
-    func setRotation(_ radians: CGFloat) {
-        boxNode.eulerAngles.y = CGFloat(radians) + .pi
+    var body: some View {
+        HStack(spacing: gap) {
+            ForEach(0..<count, id: \.self) { _ in
+                Rectangle()
+                    .fill(Color.white.opacity(0.6))
+                    .frame(width: dashWidth, height: rowHeight)
+            }
+        }
+        .frame(width: nineDashesWidth, height: rowHeight)
     }
 }
 
-/// NSViewRepresentable koji prikazuje 3D kocku; prima rotaciju iz GameState.
-private struct CompassCubeSceneView: NSViewRepresentable {
-    var rotation: CGFloat
+/// Širina bloka od točno 9 vertikalnih crtica.
+private let nineDashesWidth: CGFloat = 9 * 1.5 + 8 * 1.2
 
-    func makeNSView(context: Context) -> SCNView {
-        let view = SCNView()
-        view.wantsLayer = true
-        view.layer?.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
-        view.scene = context.coordinator.compassScene.scene
-        view.autoenablesDefaultLighting = false
-        view.allowsCameraControl = false
-        view.backgroundColor = .clear
-        view.antialiasingMode = .none
-        view.pointOfView = view.scene?.rootNode.childNodes.first { $0.camera != nil }
-        context.coordinator.setRotation(rotation)
-        return view
-    }
-
-    func updateNSView(_ nsView: SCNView, context: Context) {
-        context.coordinator.setRotation(rotation)
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    final class Coordinator {
-        let compassScene = CompassCubeScene()
-        func setRotation(_ r: CGFloat) { compassScene.setRotation(r) }
-    }
-}
-
-// MARK: - SwiftUI view s povlačenjem
-
-/// 3D kocka: vodoravno = rotacija mape, okomito = pan kamere gore/dolje (kao Udemy/Unreal).
-struct CompassCubeView: View {
-    @Binding var mapRotation: CGFloat
-    @Binding var tiltAngle: CGFloat
-    @Binding var panOffset: CGPoint
-    @State private var gestureStartRotation: CGFloat?
-    @State private var gestureStartPan: CGPoint?
-    private let rotationSensitivity: CGFloat = 0.008
-    private let panSensitivity: CGFloat = 1.2
+/// Jedna ćelija: samo jedno slovo, točno u sredini zone 160×32.
+private struct CompassLetterSlot: View {
+    let letter: String
 
     var body: some View {
         ZStack {
-            CompassCubeSceneView(rotation: mapRotation)
-                .frame(width: 72, height: 72)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-
-            VStack {
-                Image(systemName: "triangle.fill")
-                    .font(.system(size: 6))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .shadow(color: .black.opacity(0.6), radius: 1)
-                Text("gledanje")
-                    .font(.system(size: 8, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.85))
-                Spacer(minLength: 0)
-            }
-            .frame(width: 72, height: 72)
-            .padding(.top, 2)
-            .allowsHitTesting(false)
+            Text(letter)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.white.opacity(0.95))
         }
-        .frame(width: 72, height: 72)
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 2)
-                .onChanged { value in
-                    if gestureStartRotation == nil {
-                        gestureStartRotation = mapRotation
-                        gestureStartPan = panOffset
-                    }
-                    guard let startR = gestureStartRotation, let startP = gestureStartPan else { return }
-                    let twoPi = 2 * CGFloat.pi
-                    mapRotation = (startR + value.translation.width * rotationSensitivity).truncatingRemainder(dividingBy: twoPi)
-                    panOffset = CGPoint(x: startP.x, y: startP.y + value.translation.height * panSensitivity)
+        .frame(width: 160, height: 32)
+    }
+}
+
+/// Širina jednog segmenta: zona slova (160) + 9 crtica.
+private let letterZoneWidth: CGFloat = 160
+private let segmentWidth: CGFloat = letterZoneWidth + nineDashesWidth
+
+/// Kompas: N | 9 crtica | E | 9 crtica | S | 9 crtica | W | 9 crtica | N. 4 klika = 4 × 90° rotacije kamere.
+struct CompassCubeView: View {
+    @Binding var mapRotation: CGFloat
+    @Binding var panOffset: CGPoint
+
+    private let viewWidth: CGFloat = 160
+    private let height: CGFloat = 32
+    private let cornerRadius: CGFloat = 6
+    private let twoPi = 2 * CGFloat.pi
+
+    /// Pomak stripa: sredina prozora uvijek na sredini trenutnog slova.
+    private var stripOffsetX: CGFloat {
+        let pos = continuousPosition(from: mapRotation)
+        let centerOfCurrentSlot = pos * segmentWidth + 80
+        return 80 - centerOfCurrentSlot
+    }
+
+    var body: some View {
+        Button {
+            var start = mapRotation
+            if start >= twoPi {
+                mapRotation = 0
+                start = 0
+            }
+            let target = start + .pi / 2
+            let duration = 0.35
+            let steps = 24
+            let stepDuration = duration / Double(steps)
+            for i in 1...steps {
+                let t = CGFloat(i) / CGFloat(steps)
+                let eased = t * t * (3 - 2 * t)
+                let value = start + (target - start) * eased
+                DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration * Double(i)) {
+                    var v = value
+                    while v < 0 { v += twoPi }
+                    if v >= twoPi { v = twoPi }
+                    mapRotation = v
                 }
-                .onEnded { _ in
-                    gestureStartRotation = nil
-                    gestureStartPan = nil
-                }
-        )
+            }
+        } label: {
+            HStack(spacing: 0) {
+                CompassLetterSlot(letter: "N")
+                NineDashes()
+                CompassLetterSlot(letter: "E")
+                NineDashes()
+                CompassLetterSlot(letter: "S")
+                NineDashes()
+                CompassLetterSlot(letter: "W")
+                NineDashes()
+                CompassLetterSlot(letter: "N")
+            }
+            .offset(x: stripOffsetX)
+            .frame(width: viewWidth, height: height)
+            .clipped()
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .frame(width: viewWidth, height: height)
+        .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: cornerRadius))
     }
 }
 
 #Preview {
     CompassCubeView(
         mapRotation: .constant(0),
-        tiltAngle: .constant(20 * .pi / 180),
         panOffset: .constant(.zero)
     )
-    .frame(width: 100, height: 100)
-    .background(Color.gray.opacity(0.3))
+    .frame(width: 160, height: 32)
 }
