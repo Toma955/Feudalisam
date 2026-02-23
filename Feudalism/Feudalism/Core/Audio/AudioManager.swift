@@ -16,7 +16,12 @@ final class AudioManager: ObservableObject {
     static let mapMusicAssetName = "map_music"
     static let mapMusicExtensions = ["mp3", "m4a", "wav"]
 
+    /// Intro soundtrack (početna animacija). Datoteka soundtrack.mp3 u Audio folderu.
+    static let introSoundtrackName = "soundtrack"
+    static let introSoundtrackExtensions = ["mp3", "m4a", "wav"]
+
     private var mapMusicPlayer: AVAudioPlayer?
+    private var introSoundtrackPlayer: AVAudioPlayer?
     private var soundPlayers: [String: AVAudioPlayer] = [:]
     private let speechSynthesizer = AVSpeechSynthesizer()
 
@@ -40,9 +45,66 @@ final class AudioManager: ObservableObject {
         }
     }
 
+    private static let fadeOutDuration: TimeInterval = 0.6
+    private static let fadeOutSteps = 12
+
     func stopMapMusic() {
-        mapMusicPlayer?.stop()
+        guard let player = mapMusicPlayer else { return }
         mapMusicPlayer = nil
+        fadeOutAndStop(player: player, duration: Self.fadeOutDuration)
+    }
+
+    // MARK: - Intro soundtrack (početna animacija)
+
+    /// Pokreni intro soundtrack (soundtrack.mp3). volume 0...1. Zaustavi pri stopIntroSoundtrack().
+    func playIntroSoundtrackIfAvailable(volume: Double) {
+        stopIntroSoundtrack()
+        guard let url = urlForIntroSoundtrack(), volume > 0.01 else { return }
+        do {
+            let player = try AVAudioPlayer(contentsOf: url)
+            player.numberOfLoops = 0
+            player.volume = Float(volume)
+            player.prepareToPlay()
+            player.play()
+            introSoundtrackPlayer = player
+        } catch {
+            introSoundtrackPlayer = nil
+        }
+    }
+
+    func stopIntroSoundtrack() {
+        guard let player = introSoundtrackPlayer else { return }
+        introSoundtrackPlayer = nil
+        fadeOutAndStop(player: player, duration: Self.fadeOutDuration)
+    }
+
+    /// Lagani fade out: smanji glasnoću do 0 pa zaustavi reprodukciju.
+    private func fadeOutAndStop(player: AVAudioPlayer, duration: TimeInterval) {
+        let startVolume = player.volume
+        let stepCount = Self.fadeOutSteps
+        let stepDuration = duration / Double(stepCount)
+        var step = 0
+        func nextStep() {
+            step += 1
+            if step > stepCount {
+                player.stop()
+                return
+            }
+            let progress = Double(step) / Double(stepCount)
+            player.volume = max(0, Float(startVolume) * Float(1 - progress))
+            DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration) { nextStep() }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + stepDuration) { nextStep() }
+    }
+
+    private func urlForIntroSoundtrack() -> URL? {
+        let bundle = Bundle.main
+        for ext in Self.introSoundtrackExtensions {
+            if let url = bundle.url(forResource: Self.introSoundtrackName, withExtension: ext) {
+                return url
+            }
+        }
+        return nil
     }
 
     /// Ažuriraj glasnoću trenutno puštane muzike mape (npr. kad korisnik mijenja Postavke → Audio).

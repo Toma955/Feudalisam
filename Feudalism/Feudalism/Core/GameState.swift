@@ -20,6 +20,62 @@ enum InputDevice: String, CaseIterable {
     }
 }
 
+/// Jezik sučelja – priprema za lokalizaciju (hr, en, de, fr).
+enum AppLanguage: String, CaseIterable, Identifiable {
+    case croatian = "hr"
+    case english = "en"
+    case german = "de"
+    case french = "fr"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .croatian: return "Hrvatski"
+        case .english: return "English"
+        case .german: return "Deutsch"
+        case .french: return "Français"
+        }
+    }
+
+    /// Lokalni identifikator za Bundle/NSLocalizedString (npr. "hr", "en").
+    var localeIdentifier: String { rawValue }
+}
+
+/// Amblem igrača – Postavke → Profil. Kasnije se može proširiti s vlastitim slikama.
+enum PlayerEmblem: String, CaseIterable, Identifiable {
+    case shield = "shield"
+    case crown = "crown"
+    case star = "star"
+    case flag = "flag"
+    case castle = "castle"
+    case lion = "lion"
+
+    var id: String { rawValue }
+
+    var sfSymbolName: String {
+        switch self {
+        case .shield: return "shield.fill"
+        case .crown: return "crown.fill"
+        case .star: return "star.fill"
+        case .flag: return "flag.fill"
+        case .castle: return "building.2.fill"
+        case .lion: return "pawprint.fill"
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .shield: return "Štit"
+        case .crown: return "Kruna"
+        case .star: return "Zvijezda"
+        case .flag: return "Zastava"
+        case .castle: return "Dvorac"
+        case .lion: return "Lav"
+        }
+    }
+}
+
 /// Način igre: jedan kraj = solo; više = natjecateljski (pobijedi onaj koji zadnji ostane).
 enum GameMode {
     /// Jedan realm na mapi – solo igra.
@@ -79,6 +135,10 @@ final class GameState: ObservableObject {
     private var soloResourceAnimationWorkItem: DispatchWorkItem?
 
     private static let inputDeviceKey = "Feudalism.inputDevice"
+    private static let appLanguageKey = "Feudalism.appLanguage"
+    private static let playerProfileNameKey = "Feudalism.playerProfileName"
+    private static let playerEmblemIdKey = "Feudalism.playerEmblemId"
+    private static let showStartupAnimationKey = "Feudalism.showStartupAnimation"
     private static let audioMusicVolumeKey = "Feudalism.audioMusicVolume"
     private static let audioSoundsVolumeKey = "Feudalism.audioSoundsVolume"
     private static let audioSpeechVolumeKey = "Feudalism.audioSpeechVolume"
@@ -101,10 +161,36 @@ final class GameState: ObservableObject {
         didSet { UserDefaults.standard.set(audioSpeechVolume, forKey: Self.audioSpeechVolumeKey) }
     }
 
+    /// Jezik sučelja (hr, en, de, fr). Postavke → General; priprema za lokalizaciju.
+    @Published var appLanguage: AppLanguage {
+        didSet { UserDefaults.standard.set(appLanguage.rawValue, forKey: Self.appLanguageKey) }
+    }
+
+    /// Naziv profila igrača. Postavke → Profil.
+    @Published var playerProfileName: String {
+        didSet { UserDefaults.standard.set(playerProfileName, forKey: Self.playerProfileNameKey) }
+    }
+
+    /// Amblem profila (shield, crown, …). Postavke → Profil.
+    @Published var playerEmblemId: String {
+        didSet { UserDefaults.standard.set(playerEmblemId, forKey: Self.playerEmblemIdKey) }
+    }
+
+    /// true = prikaži početnu animaciju pri pokretanju igre. Postavke → General.
+    @Published var showStartupAnimation: Bool {
+        didSet { UserDefaults.standard.set(showStartupAnimation, forKey: Self.showStartupAnimationKey) }
+    }
+
     init(mapSize: MapSizePreset = .small) {
         self.gameMap = mapSize.makeGameMap()
         let raw = UserDefaults.standard.string(forKey: Self.inputDeviceKey) ?? InputDevice.trackpad.rawValue
         self.inputDevice = InputDevice(rawValue: raw) ?? .trackpad
+        let langRaw = UserDefaults.standard.string(forKey: Self.appLanguageKey) ?? AppLanguage.croatian.rawValue
+        self.appLanguage = AppLanguage(rawValue: langRaw) ?? .croatian
+        self.playerProfileName = UserDefaults.standard.string(forKey: Self.playerProfileNameKey) ?? ""
+        let emblemRaw = UserDefaults.standard.string(forKey: Self.playerEmblemIdKey) ?? PlayerEmblem.shield.rawValue
+        self.playerEmblemId = PlayerEmblem(rawValue: emblemRaw)?.rawValue ?? PlayerEmblem.shield.rawValue
+        self.showStartupAnimation = UserDefaults.standard.object(forKey: Self.showStartupAnimationKey) as? Bool ?? true
         self.audioMusicVolume = UserDefaults.standard.object(forKey: Self.audioMusicVolumeKey) as? Double ?? 0.6
         self.audioSoundsVolume = UserDefaults.standard.object(forKey: Self.audioSoundsVolumeKey) as? Double ?? 0.8
         self.audioSpeechVolume = UserDefaults.standard.object(forKey: Self.audioSpeechVolumeKey) as? Double ?? 0.8

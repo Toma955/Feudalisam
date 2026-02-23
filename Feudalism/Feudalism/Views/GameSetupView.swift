@@ -30,6 +30,19 @@ struct GameSetupView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
+                    HStack {
+                        Button {
+                            dismiss()
+                        } label: {
+                            Label("Nazad", systemImage: "chevron.backward")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.95))
+                        }
+                        .buttonStyle(.plain)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.bottom, 4)
+
                     Text("Nova igra")
                         .font(.custom("Georgia", size: 28))
                         .foregroundStyle(.white)

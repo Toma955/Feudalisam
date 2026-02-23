@@ -407,6 +407,16 @@ struct SceneKitMapView: NSViewRepresentable {
     var onRemoveAt: ((Int, Int) -> Void)?
     var isPlaceMode: Bool { gameState.selectedPlacementObjectId != nil }
 
+    /// Pred-učitanje resursa igre tijekom početne animacije (teren, zid .obj). Pozovi iz IntroView.onAppear.
+    static func preloadGameAssets() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            _ = makeTerrainTexture()
+            DispatchQueue.main.async {
+                _ = Wall.loadSceneKitNode(from: .main)
+            }
+        }
+    }
+
     func makeNSView(context: Context) -> NSView {
         let container = SceneKitMapNSView()
         container.wantsLayer = true

@@ -11,12 +11,18 @@ import SwiftUI
 struct FeudalismApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var gameState = GameState()
+    /// Kad je true i showStartupAnimation uključen, prikaže se IntroView (crni ekran + animacija) prije glavnog izbornika.
+    @State private var showIntroScreen = true
 
     var body: some Scene {
         WindowGroup {
             Group {
                 if gameState.isShowingMainMenu {
-                    MainMenuView()
+                    if gameState.showStartupAnimation, showIntroScreen {
+                        IntroView(onComplete: { showIntroScreen = false })
+                    } else {
+                        MainMenuView()
+                    }
                 } else if gameState.isMapEditorMode {
                     MapEditorView()
                 } else {
