@@ -32,17 +32,21 @@ private func cardinalIndex(from rotation: CGFloat) -> Int {
     return idx < 0 ? idx + 4 : idx
 }
 
-/// Kompas: jedno slovo upada u kadar, drugo ispada. Klik → odmah animacija + rotacija 90°.
+/// Kompas: prvi klik odmah pokreće rotaciju; klik tijekom animacije dodaje još jedan korak (nastavi bez stanka). Nema čekanja.
 struct CompassCubeView: View {
     @Binding var mapRotation: CGFloat
     @Binding var panOffset: CGPoint
     @StateObject private var displayState = CompassDisplayState()
+    @State private var isAnimating = false
+    /// Klikovi tijekom animacije → još toliko rotacija nakon trenutnog koraka.
+    @State private var queuedExtraRotations = 0
 
     private let viewWidth: CGFloat = 160
     private let height: CGFloat = 24
     private let cornerRadius: CGFloat = 6
     private let twoPi = 2 * CGFloat.pi
     private let animDuration: Double = 0.3
+    private let oneStepDuration: TimeInterval = 0.35
 
     private var currentLetter: String {
         if let overrideIdx = displayState.overrideIndex {
@@ -51,33 +55,53 @@ struct CompassCubeView: View {
         return cardinals[cardinalIndex(from: mapRotation)]
     }
 
-    var body: some View {
-        Button {
-            let currentIdx = cardinalIndex(from: mapRotation)
-            let nextIdx = (currentIdx + 1) % 4
-            withAnimation(.easeInOut(duration: animDuration)) {
-                displayState.overrideIndex = nextIdx
-            }
-            var start = mapRotation
-            if start >= twoPi { start = 0 }
-            let target = start + .pi / 2
-            let duration: TimeInterval = 0.35
-            let startTime = CACurrentMediaTime()
-            let state = displayState
-            let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { t in
-                let elapsed = CACurrentMediaTime() - startTime
-                let ti = min(1.0, CGFloat(elapsed / duration))
-                let eased = easeInOutCubic(ti)
-                var v = start + (target - start) * eased
-                while v < 0 { v += twoPi }
-                if v >= twoPi { v = 0 }
-                mapRotation = v
-                if ti >= 1.0 {
-                    t.invalidate()
-                    DispatchQueue.main.async { state.overrideIndex = nil }
+    /// Jedna rotacija 90°. Kad gotovo: ako ima queued ili remaining, odmah sljedeća; inače kraj.
+    private func performOneRotation(remainingSteps: Int, onAllComplete: @escaping () -> Void) {
+        let currentIdx = cardinalIndex(from: mapRotation)
+        let nextIdx = (currentIdx + 1) % 4
+        withAnimation(.easeInOut(duration: animDuration)) {
+            displayState.overrideIndex = nextIdx
+        }
+        var start = mapRotation
+        while start < 0 { start += twoPi }
+        if start >= twoPi { start = start.truncatingRemainder(dividingBy: twoPi) }
+        let target = start + .pi / 2
+        let startTime = CACurrentMediaTime()
+        let state = displayState
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { t in
+            let elapsed = CACurrentMediaTime() - startTime
+            let ti = min(1.0, CGFloat(elapsed / oneStepDuration))
+            let eased = easeInOutCubic(ti)
+            var v = start + (target - start) * eased
+            while v < 0 { v += twoPi }
+            if v >= twoPi { v = v.truncatingRemainder(dividingBy: twoPi) }
+            mapRotation = v
+            if ti >= 1.0 {
+                t.invalidate()
+                let extra = queuedExtraRotations
+                queuedExtraRotations = 0
+                let next = max(0, remainingSteps - 1) + extra
+                DispatchQueue.main.async {
+                    if next > 0 {
+                        performOneRotation(remainingSteps: next, onAllComplete: onAllComplete)
+                    } else {
+                        state.overrideIndex = nil
+                        onAllComplete()
+                    }
                 }
             }
-            RunLoop.main.add(timer, forMode: .common)
+        }
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    var body: some View {
+        Button {
+            if isAnimating {
+                queuedExtraRotations = min(queuedExtraRotations + 1, 3)
+            } else {
+                isAnimating = true
+                performOneRotation(remainingSteps: 1, onAllComplete: { isAnimating = false })
+            }
         } label: {
             Text(currentLetter)
                 .font(.system(size: 14, weight: .bold))
