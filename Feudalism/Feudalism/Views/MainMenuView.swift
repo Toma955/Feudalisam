@@ -29,6 +29,7 @@ struct MainMenuView: View {
     @EnvironmentObject private var gameState: GameState
     @State private var showPostavke = false
     @State private var showGameSetup = false
+    @State private var showSoloSetup = false
     @State private var postavkeSection: PostavkeSection = .general
     @State private var showExitConfirmation = false
 
@@ -40,6 +41,13 @@ struct MainMenuView: View {
             VStack(spacing: 0) {
                 if showPostavke {
                     embeddedPostavkeContent
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .scale(scale: 0.92)),
+                            removal: .opacity.combined(with: .scale(scale: 0.92))
+                        ))
+                } else if showSoloSetup {
+                    SoloSetupView(isPresented: $showSoloSetup)
+                        .environmentObject(gameState)
                         .transition(.asymmetric(
                             insertion: .opacity.combined(with: .scale(scale: 0.92)),
                             removal: .opacity.combined(with: .scale(scale: 0.92))
@@ -56,9 +64,10 @@ struct MainMenuView: View {
             .background(.ultraThinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous))
             .shadow(color: .black.opacity(0.35), radius: 24, y: 12)
-            .frame(maxWidth: showPostavke ? postavkePanelMaxWidth : menuPanelMaxWidth, maxHeight: showPostavke ? postavkePanelMaxHeight : menuPanelMaxHeight)
+            .frame(maxWidth: (showPostavke ? postavkePanelMaxWidth : (showSoloSetup ? 320 : menuPanelMaxWidth)), maxHeight: (showPostavke ? postavkePanelMaxHeight : (showSoloSetup ? 420 : menuPanelMaxHeight)))
             .padding(56)
             .animation(.easeInOut(duration: menuPostavkeTransitionDuration), value: showPostavke)
+            .animation(.easeInOut(duration: menuPostavkeTransitionDuration), value: showSoloSetup)
         }
         .sheet(isPresented: $showGameSetup) {
             GameSetupView()
@@ -112,8 +121,9 @@ struct MainMenuView: View {
 
             VStack(spacing: 14) {
                 menuTile(title: "Solo", icon: "play.circle.fill") {
-                    AudioManager.shared.stopIntroSoundtrack()
-                    gameState.startNewGameWithSetup(humanName: "Igrač", selectedAIProfileIds: [])
+                    withAnimation(.easeInOut(duration: menuPostavkeTransitionDuration)) {
+                        showSoloSetup = true
+                    }
                 }
                 menuTile(title: "Nova igra", icon: "plus.circle.fill") {
                     AudioManager.shared.stopIntroSoundtrack()

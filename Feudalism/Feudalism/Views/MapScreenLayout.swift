@@ -10,7 +10,7 @@ import SwiftUI
 
 // MARK: - Zajednička HUD traka (isti izgled za igru i Map Editor)
 
-/// Ista traka gore za solo i Map Editor: fiksna širina 1380×52, ultraThinMaterial, zaobljenost 10.
+/// Ista traka gore za solo i Map Editor: širina taman da sve stane (bez rastezanja), visina 52.
 struct MapScreenHUDBar<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
@@ -21,9 +21,10 @@ struct MapScreenHUDBar<Content: View>: View {
                 HStack(spacing: 16) {
                     content()
                 }
-                .padding(.horizontal, 6)
+                .padding(.horizontal, 10)
                 .padding(.vertical, 0)
-                .frame(minWidth: 1380, maxWidth: 1380, minHeight: 52, maxHeight: 52)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minHeight: 52, maxHeight: 52)
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
                 .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 1)
                 Spacer(minLength: 0)

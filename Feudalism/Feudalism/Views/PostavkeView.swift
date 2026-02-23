@@ -137,6 +137,12 @@ struct PostavkeView: View {
                     .foregroundStyle(.secondary)
             } header: { Text("Zvuk pri postavljanju") }
             Section {
+                Toggle("Zvuk pri promjeni izbornika", isOn: $gameState.playBarTransitionSound)
+                Text("Kad je uključeno, pri promjeni kategorije u donjem baru (npr. Dvor → Farma) reproducira se zvuk (transition.wav).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: { Text("Zvuk pri promjeni izbornika") }
+            Section {
                 VStack(alignment: .leading, spacing: 12) {
                     volumeRow(title: "Muzika mape", icon: "music.note", value: $gameState.audioMusicVolume)
                     volumeRow(title: "Zvukovi", icon: "speaker.wave.2.fill", value: $gameState.audioSoundsVolume)
@@ -338,6 +344,12 @@ struct PostavkeSectionContent: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: { Text("Zvuk pri postavljanju") }
+            Section {
+                Toggle("Zvuk pri promjeni izbornika", isOn: $gameState.playBarTransitionSound)
+                Text("Kad je uključeno, pri promjeni kategorije u donjem baru reproducira se zvuk (transition.wav).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: { Text("Zvuk pri promjeni izbornika") }
             Section {
                 volumeRow(title: "Muzika mape", icon: "music.note", value: $gameState.audioMusicVolume)
                 volumeRow(title: "Zvukovi", icon: "speaker.wave.2.fill", value: $gameState.audioSoundsVolume)

@@ -9,25 +9,28 @@ import Foundation
 
 /// Unaprijed definirane veličine mape. Mapa je uvijek u 1×1 jedinicama.
 enum MapSizePreset: String, CaseIterable, Identifiable {
-    case small = "100×100"
-    case medium = "200×200"
-    case large = "1000×1000"
+    case size200 = "200×200"
+    case size400 = "400×400"
+    case size800 = "800×800"
+    case size1000 = "1000×1000"
 
     var id: String { rawValue }
 
     var rows: Int {
         switch self {
-        case .small: return 100
-        case .medium: return 200
-        case .large: return 1000
+        case .size200: return 200
+        case .size400: return 400
+        case .size800: return 800
+        case .size1000: return 1000
         }
     }
 
     var cols: Int {
         switch self {
-        case .small: return 100
-        case .medium: return 200
-        case .large: return 1000
+        case .size200: return 200
+        case .size400: return 400
+        case .size800: return 800
+        case .size1000: return 1000
         }
     }
 

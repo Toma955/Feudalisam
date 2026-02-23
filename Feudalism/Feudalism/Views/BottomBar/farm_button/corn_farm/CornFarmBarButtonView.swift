@@ -1,13 +1,13 @@
 //
-//  SpicesFarmBarButtonView.swift
+//  CornFarmBarButtonView.swift
 //  Feudalism
 //
-//  Gumb „Začini” (spices) u donjem izborniku – kategorija Farma, biljke.
+//  Gumb „Kukuruz” (corn) u donjem izborniku – kategorija Farma.
 //
 
 import SwiftUI
 
-struct SpicesFarmBarButtonView: View {
+struct CornFarmBarButtonView: View {
     @EnvironmentObject private var gameState: GameState
     var action: () -> Void
     var iconOnly: Bool = false
@@ -15,9 +15,9 @@ struct SpicesFarmBarButtonView: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 2) {
-                BarIconView(assetName: "spices", systemName: "leaf.fill", size: iconOnly ? 34 : 52)
+                BarIconView(assetName: "corn", systemName: "leaf.fill", size: iconOnly ? 34 : 52)
                 if !iconOnly {
-                    Text(LocalizedStrings.string(for: "spices_farm", language: gameState.appLanguage))
+                    Text(LocalizedStrings.string(for: "corn_farm", language: gameState.appLanguage))
                         .font(.system(size: 10))
                         .foregroundStyle(.white.opacity(0.9))
                 }

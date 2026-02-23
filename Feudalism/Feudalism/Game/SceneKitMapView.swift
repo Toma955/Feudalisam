@@ -167,10 +167,8 @@ private final class SceneKitMapNSView: NSView {
         guard bounds.width > 0, bounds.height > 0 else { return }
         if handPanMode {
             addCursorRect(bounds, cursor: .openHand)
-        } else if selectedToolsPanelItem == "mace" {
-            addCursorRect(bounds, cursor: Self.maceCursor)
         } else {
-            addCursorRect(bounds, cursor: Self.swordCursor)
+            addCursorRect(bounds, cursor: .arrow)
         }
     }
 

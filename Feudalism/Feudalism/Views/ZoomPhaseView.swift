@@ -75,8 +75,8 @@ private struct ZoomPhaseIcon: View {
 struct ZoomPhaseView: View {
     @Binding var mapCameraSettings: MapCameraSettings
 
-    private let viewWidth: CGFloat = 92
-    private let height: CGFloat = 24
+    private let viewWidth: CGFloat = 120
+    private let height: CGFloat = 28
     private let cornerRadius: CGFloat = 10
 
     private var currentPhase: Int {
@@ -109,5 +109,5 @@ struct ZoomPhaseView: View {
 
 #Preview {
     ZoomPhaseView(mapCameraSettings: .constant(MapCameraSettings()))
-        .frame(width: 92, height: 24)
+        .frame(width: 120, height: 28)
 }

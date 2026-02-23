@@ -148,6 +148,7 @@ final class GameState: ObservableObject {
     private static let showStartupAnimationKey = "Feudalism.showStartupAnimation"
     private static let showBottomBarLabelsKey = "Feudalism.showBottomBarLabels"
     private static let playPlacementSoundKey = "Feudalism.playPlacementSound"
+    private static let playBarTransitionSoundKey = "Feudalism.playBarTransitionSound"
     private static let audioMusicVolumeKey = "Feudalism.audioMusicVolume"
     private static let audioSoundsVolumeKey = "Feudalism.audioSoundsVolume"
     private static let audioSpeechVolumeKey = "Feudalism.audioSpeechVolume"
@@ -200,7 +201,12 @@ final class GameState: ObservableObject {
         didSet { UserDefaults.standard.set(playPlacementSound, forKey: Self.playPlacementSoundKey) }
     }
 
-    init(mapSize: MapSizePreset = .small) {
+    /// true = reproduciraj transition.wav kad se u donjem baru mijenja kategorija (npr. Dvor → Farma). Postavke → Audio.
+    @Published var playBarTransitionSound: Bool {
+        didSet { UserDefaults.standard.set(playBarTransitionSound, forKey: Self.playBarTransitionSoundKey) }
+    }
+
+    init(mapSize: MapSizePreset = .size200) {
         self.gameMap = mapSize.makeGameMap()
         let raw = UserDefaults.standard.string(forKey: Self.inputDeviceKey) ?? InputDevice.trackpad.rawValue
         self.inputDevice = InputDevice(rawValue: raw) ?? .trackpad
@@ -212,6 +218,7 @@ final class GameState: ObservableObject {
         self.showStartupAnimation = UserDefaults.standard.object(forKey: Self.showStartupAnimationKey) as? Bool ?? true
         self.showBottomBarLabels = UserDefaults.standard.object(forKey: Self.showBottomBarLabelsKey) as? Bool ?? true
         self.playPlacementSound = UserDefaults.standard.object(forKey: Self.playPlacementSoundKey) as? Bool ?? true
+        self.playBarTransitionSound = UserDefaults.standard.object(forKey: Self.playBarTransitionSoundKey) as? Bool ?? true
         self.audioMusicVolume = UserDefaults.standard.object(forKey: Self.audioMusicVolumeKey) as? Double ?? 0.6
         self.audioSoundsVolume = UserDefaults.standard.object(forKey: Self.audioSoundsVolumeKey) as? Double ?? 0.8
         self.audioSpeechVolume = UserDefaults.standard.object(forKey: Self.audioSpeechVolumeKey) as? Double ?? 0.8
@@ -332,7 +339,7 @@ final class GameState: ObservableObject {
 
     /// Otvori Map Editor – prazna mapa 100×100.
     func openMapEditor() {
-        setMapSize(.small)
+        setMapSize(.size200)
         selectedPlacementObjectId = nil
         isShowingMainMenu = false
         isMapEditorMode = true
@@ -397,8 +404,8 @@ final class GameState: ObservableObject {
         }
     }
 
-    /// Dodaj sebe (human lord) i odabrane AI lordove, pa pokreni igru. Solo = samo ti, mapa 100×100.
-    func startNewGameWithSetup(humanName: String, humanColorHex: String = "2E86AB", selectedAIProfileIds: [String]) {
+    /// Dodaj sebe (human lord) i odabrane AI lordove, pa pokreni igru. Solo = samo ti; mapSize određuje veličinu mape.
+    func startNewGameWithSetup(humanName: String, humanColorHex: String = "2E86AB", selectedAIProfileIds: [String], mapSize: MapSizePreset = .size200) {
         let store = AILordProfileStore.shared
         var newRealms: [Realm] = []
         let human = Realm(
@@ -418,7 +425,7 @@ final class GameState: ObservableObject {
             newRealms.append(computer)
         }
         setRealms(newRealms)
-        setMapSize(.small)
+        setMapSize(mapSize)
         startNewGame()
     }
 

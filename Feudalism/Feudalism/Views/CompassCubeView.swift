@@ -41,8 +41,8 @@ struct CompassCubeView: View {
     /// Klikovi tijekom animacije → još toliko rotacija nakon trenutnog koraka.
     @State private var queuedExtraRotations = 0
 
-    private let viewWidth: CGFloat = 160
-    private let height: CGFloat = 24
+    private let viewWidth: CGFloat = 120
+    private let height: CGFloat = 28
     private let cornerRadius: CGFloat = 6
     private let twoPi = 2 * CGFloat.pi
     private let animDuration: Double = 0.3
@@ -105,7 +105,18 @@ struct CompassCubeView: View {
         } label: {
             Text(currentLetter)
                 .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(.white.opacity(0.95))
+                .foregroundStyle(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .red, location: 0),
+                            .init(color: .red, location: 0.5),
+                            .init(color: .white, location: 0.5),
+                            .init(color: .white, location: 1)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
                 .frame(width: viewWidth, height: height)
                 .id(currentLetter)
                 .transition(.asymmetric(
@@ -134,5 +145,5 @@ private final class CompassDisplayState: ObservableObject {
         mapRotation: .constant(.pi),
         panOffset: .constant(.zero)
     )
-    .frame(width: 160, height: 24)
+    .frame(width: 120, height: 28)
 }

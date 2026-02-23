@@ -125,7 +125,7 @@ private struct HUDScoreView: View {
     let max: Int
 
     private static let viewWidth: CGFloat = 160
-    private static let height: CGFloat = 24
+    private static let height: CGFloat = 28
     private static let cornerRadius: CGFloat = 6
 
     private var currentClamped: Int { min(999, Swift.max(0, current)) }
@@ -164,10 +164,38 @@ private enum BottomBarCategory: String, CaseIterable {
     case castle
     case sword
     case mine
+    case house
     case cave
     case farm
     case food
     case tools
+}
+
+/// Godišnja doba za HUD – ikone spring.png, summer.png, attun.png, winter.png. Redoslijed: zima → proljeće → ljeto → jesen → zima (nova godina).
+private enum SeasonIcon: String, CaseIterable {
+    case spring = "spring"
+    case summer = "summer"
+    case attun = "attun"
+    case winter = "winter"
+
+    /// Redoslijed u godini: zima, proljeće, ljeto, jesen.
+    private static let cycle: [SeasonIcon] = [.winter, .spring, .summer, .attun]
+
+    /// Sljedeće doba; kad attun → winter, jedna godina je prošla.
+    static func next(after s: SeasonIcon) -> (season: SeasonIcon, yearCompleted: Bool) {
+        guard let idx = cycle.firstIndex(of: s) else { return (.winter, false) }
+        let nextIdx = (idx + 1) % cycle.count
+        let nextSeason = cycle[nextIdx]
+        let yearCompleted = (nextIdx == 0)
+        return (nextSeason, yearCompleted)
+    }
+
+    /// Doba i godina iz proteklih sekundi od početka igre (60 s = 1 doba, 240 s = 1 godina).
+    static func fromElapsedSeconds(_ totalSeconds: Int) -> (season: SeasonIcon, yearOffset: Int) {
+        let seasonIndex = (totalSeconds / 60) % cycle.count
+        let yearOffset = totalSeconds / 240
+        return (cycle[seasonIndex], yearOffset)
+    }
 }
 
 /// Širina područja sadržaja (za ograničavanje max širine donjeg bara).
@@ -176,13 +204,17 @@ private struct ContentAreaWidthKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
-/// Minimalna širina donjeg bara = širina trenutnog rasporeda (7 ikona + padding). Dimenzije se ne smiju sužavati.
+/// Minimalna širina donjeg bara – uvijek ostaje ta širina; ne smije biti manja ni kad je pretinac prazan.
 private let bottomBarMinWidth: CGFloat = 620
+/// Kad je pretinac otvoren, bar se minimalno poveća da sadržaj lijepo stane (ne od ruba do ruba).
+private let bottomBarExpandedMinWidth: CGFloat = 720
 
 struct ContentView: View {
     @EnvironmentObject private var gameState: GameState
     @State private var showMinijatureWall = false
     @State private var expandedBottomCategory: BottomBarCategory? = nil
+    /// Smjer tranzicije proširenog sadržaja: true = novi dolazi s desne, stari ide ulijevo; false = obrnuto.
+    @State private var bottomBarTransitionFromRight: Bool = true
     @State private var contentAreaWidth: CGFloat = 830
     @State private var showGrid = true
     @State private var handPanMode = false
@@ -193,6 +225,16 @@ struct ContentView: View {
     /// HUD ispis 0/0 i postotak – mijenjaju se iz logike (npr. populacija / kapacitet).
     @State private var hudScoreCurrent: Int = 0
     @State private var hudScoreMax: Int = 0
+    /// Trenutno godišnje doba za HUD; počinje zima.
+    @State private var displayedSeason: SeasonIcon = .winter
+    /// Godina u HUD-u; +1 nakon svakog ciklusa 4 doba.
+    @State private var displayedYear: Int = 1100
+    /// Ikona koja upravo odlazi (animacija prema dolje); nil kad nema prijelaza.
+    @State private var outgoingSeason: SeasonIcon?
+    /// Offset za odlazeću ikonu (0 → 36); za dolaznu -36 → 0.
+    @State private var seasonAnimOffset: CGFloat = 0
+    /// Početak igre – sat ovisi samo o ovom; neprestano broji od ovog trenutka.
+    @State private var gameStartTime: Date?
 
     var body: some View {
         MapScreenLayout(
@@ -203,36 +245,45 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .ignoresSafeArea()
 
-                    VStack {
+                    VStack(spacing: 0) {
                         Spacer()
-                        Group {
-                            if expandedBottomCategory != nil {
-                                HStack(spacing: 0) {
-                                    Spacer(minLength: 0)
-                                    bottomBarContent
+                        // Jedan objekt koji naraste prema gore; ikone dole pri dnu, sadržaj gore
+                        HStack(spacing: 0) {
+                            Spacer(minLength: 0)
+                            VStack(spacing: 0) {
+                                if let category = expandedBottomCategory {
+                                    expandedBottomBarContent(category: category)
                                         .padding(.horizontal, 20)
-                                        .padding(.vertical, 12)
-                                        .frame(maxHeight: 96)
-                                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
-                                        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.25), lineWidth: 1))
-                                        .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 4)
-                                        .frame(
-                                            minWidth: bottomBarMinWidth,
-                                            maxWidth: min(830, contentAreaWidth * 0.92)
-                                        )
-                                    Spacer(minLength: 0)
+                                        .padding(.top, 16)
+                                        .padding(.bottom, 10)
+                                        .transition(.asymmetric(
+                                            insertion: .move(edge: bottomBarTransitionFromRight ? .trailing : .leading),
+                                            removal: .move(edge: bottomBarTransitionFromRight ? .leading : .trailing)
+                                        ))
                                 }
-                            } else {
-                                bottomBarContent
-                                    .padding(.horizontal, 28)
-                                    .padding(.vertical, 14)
-                                    .frame(minWidth: bottomBarMinWidth)
-                                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
-                                    .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.25), lineWidth: 1))
-                                    .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 4)
+                                Spacer(minLength: 0)
+                                bottomBarStrip
+                                    .padding(.horizontal, expandedBottomCategory != nil ? 20 : 28)
+                                    .padding(.vertical, expandedBottomCategory != nil ? 10 : 14)
+                                    .padding(.bottom, expandedBottomCategory != nil ? 10 : 0)
                             }
+                            .clipped()
+                            .animation(.easeInOut(duration: 0.28), value: expandedBottomCategory)
+                            .frame(
+                                minWidth: expandedBottomCategory != nil ? bottomBarExpandedMinWidth : bottomBarMinWidth,
+                                minHeight: expandedBottomCategory != nil ? 180 : 80,
+                                maxHeight: expandedBottomCategory != nil ? 180 : 80
+                            )
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+                            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.25), lineWidth: 1))
+                            .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 4)
+                            .frame(
+                                minWidth: expandedBottomCategory != nil ? bottomBarExpandedMinWidth : bottomBarMinWidth,
+                                maxWidth: min(830, contentAreaWidth * 0.92)
+                            )
+                            Spacer(minLength: 0)
                         }
-                        .padding(.bottom, 20)
+                        .padding(.bottom, expandedBottomCategory != nil ? 88 : 20)
                         .animation(.easeInOut(duration: 0.28), value: expandedBottomCategory)
                     }
                 }
@@ -254,8 +305,10 @@ struct ContentView: View {
         )
         .onChange(of: gameState.isLevelReady) { ready in
             if ready {
+                gameStartTime = Date()
                 AudioManager.shared.playMapMusicIfAvailable(volume: gameState.audioMusicVolume)
             } else {
+                gameStartTime = nil
                 AudioManager.shared.stopMapMusic()
             }
         }
@@ -263,59 +316,109 @@ struct ContentView: View {
             AudioManager.shared.updateMapMusicVolume(volume: vol)
         }
         .onAppear { printIconDiagnostics() }
-    }
-
-    /// Donji bar: ili 5 ikona (castle, sword, mine, farm, food) ili prošireni island s pod-ikonama.
-    @ViewBuilder
-    private var bottomBarContent: some View {
-        if let category = expandedBottomCategory {
-            expandedBottomBar(category: category)
-        } else {
-            HStack(spacing: 24) {
-                ForEach(BottomBarCategory.allCases, id: \.self) { cat in
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.28)) { expandedBottomCategory = cat }
-                    } label: { barIcon(for: cat) }
-                    .buttonStyle(.plain)
-                }
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
+            guard let start = gameStartTime, gameState.isLevelReady, !gameState.isShowingMainMenu, !gameState.isMapEditorMode else { return }
+            let totalSeconds = Int(Date().timeIntervalSince(start))
+            let (newSeason, yearOffset) = SeasonIcon.fromElapsedSeconds(totalSeconds)
+            let newYear = 1100 + yearOffset
+            if newSeason != displayedSeason {
+                applySeasonChange(to: newSeason, year: newYear)
+            } else if newYear != displayedYear {
+                displayedYear = newYear
             }
         }
     }
 
-    private func barIcon(for category: BottomBarCategory) -> some View {
+    /// Primijeni novo doba i godinu (iz sata) s animacijom.
+    private func applySeasonChange(to newSeason: SeasonIcon, year newYear: Int) {
+        let leaving = displayedSeason
+        outgoingSeason = leaving
+        displayedSeason = newSeason
+        displayedYear = newYear
+        seasonAnimOffset = 0
+        withAnimation(.easeInOut(duration: 0.45)) {
+            seasonAnimOffset = 36
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            outgoingSeason = nil
+            seasonAnimOffset = 0
+        }
+    }
+
+    /// Sam traka s ikonama – smanjene kad je pretinac otvoren. Sadržaj se prikazuje iznad (island prema gore).
+    private var bottomBarStrip: some View {
+        barIconsRow(
+            compact: expandedBottomCategory != nil,
+            expandedCategory: expandedBottomCategory
+        )
+    }
+
+    /// Red ikona: compact = smanjene (kad je prošireno), inače normalne. Klik na istu ikonu kao trenutno otvorenu vraća početno.
+    private func barIconsRow(compact: Bool, expandedCategory: BottomBarCategory?) -> some View {
+        let iconSize: CGFloat = compact ? 32 : 48
+        let foodIconSize: CGFloat = compact ? 36 : 56
+        return HStack(spacing: compact ? 12 : 24) {
+            ForEach(BottomBarCategory.allCases, id: \.self) { cat in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.28)) {
+                        if let expanded = expandedCategory, cat == expanded {
+                            expandedBottomCategory = nil
+                        } else {
+                            if expandedCategory != nil, gameState.playBarTransitionSound {
+                                AudioManager.shared.playSound(named: "transition", volume: gameState.audioSoundsVolume)
+                            }
+                            let order = BottomBarCategory.allCases
+                            let oldIdx = expandedCategory.flatMap { order.firstIndex(of: $0) }
+                            let newIdx = order.firstIndex(of: cat) ?? 0
+                            bottomBarTransitionFromRight = (newIdx > (oldIdx ?? -1))
+                            expandedBottomCategory = cat
+                        }
+                    }
+                } label: {
+                    let size = cat == .food ? foodIconSize : iconSize
+                    barIcon(for: cat, size: size)
+                        .offset(y: cat == .food ? -4 : 0)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func barIcon(for category: BottomBarCategory, size: CGFloat = 48) -> some View {
         let icon: BarIconView = {
             switch category {
-            case .castle: return BarIconView(assetName: "castle", systemName: "building.columns.fill")
-            case .sword: return BarIconView(assetName: "sword", systemName: "crossed.swords")
-            case .mine: return BarIconView(assetName: "mine", systemName: "hammer.fill")
-            case .cave: return BarIconView(assetName: "cave", systemName: "mountain.2.fill")
-            case .farm: return BarIconView(assetName: "farm", systemName: "leaf.fill")
-            case .food: return BarIconView(assetName: "food", systemName: "fork.knife")
-            case .tools: return BarIconView(assetName: "tools", systemName: "wrench.and.screwdriver.fill")
+            case .castle: return BarIconView(assetName: "castle", systemName: "building.columns.fill", size: size)
+            case .sword: return BarIconView(assetName: "sword", systemName: "crossed.swords", size: size)
+            case .mine: return BarIconView(assetName: "mine", systemName: "hammer.fill", size: size)
+            case .house: return BarIconView(assetName: "house", systemName: "house.fill", size: size)
+            case .cave: return BarIconView(assetName: "cave", systemName: "mountain.2.fill", size: size)
+            case .farm: return BarIconView(assetName: "farm", systemName: "leaf.fill", size: size)
+            case .food: return BarIconView(assetName: "food", systemName: "fork.knife", size: size)
+            case .tools: return BarIconView(assetName: "tools", systemName: "wrench.and.screwdriver.fill", size: size)
             }
         }()
-        return VStack(spacing: 2) {
-            icon
-            if gameState.showBottomBarLabels {
-                Text(titleForCategory(category))
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(0.9))
-            }
-        }
+        return icon
     }
 
-    /// Prošireni island: povećan, centriran, natpisi ispod ikona, lagano odvojeni.
-    private func expandedBottomBar(category: BottomBarCategory) -> some View {
-        VStack(spacing: 10) {
+    /// Sadržaj proširenog pretinca – minimalno povećan da sve lijepo stane, ne od ruba do ruba.
+    private func expandedBottomBarContent(category: BottomBarCategory) -> some View {
+        Group {
             switch category {
             case .castle:
                 CastleButtonExpandedView(
                     onSelectWall: { gameState.selectedPlacementObjectId = Wall.objectId },
-                    onSelectMarket: { gameState.selectedPlacementObjectId = Market.objectId }
+                    onSelectMarket: { gameState.selectedPlacementObjectId = Market.objectId },
+                    onSelectArmory: { /* dvor – uskoro */ },
+                    onSelectSteps: { /* dvor – uskoro */ },
+                    onSelectStairs: { /* dvor – uskoro */ },
+                    onSelectTraining: { /* dvor – uskoro */ },
+                    onSelectGates: { /* dvor – uskoro */ },
+                    onSelectStable: { /* dvor – uskoro */ },
+                    onSelectMiners: { /* dvor – uskoro */ },
+                    onSelectEngineering: { /* dvor – uskoro */ },
+                    onSelectTowers: { /* dvor – uskoro */ },
+                    onSelectDrawbridge: { /* dvor – uskoro */ }
                 )
-                .padding(.horizontal, 24)
-                .padding(.vertical, 16)
-                .contentShape(Rectangle())
             case .farm:
                 FarmButtonExpandedView(
                     onSelectAppleFarm: { /* objekt – uskoro */ },
@@ -324,11 +427,28 @@ struct ContentView: View {
                     onSelectCowFarm: { /* objekt – uskoro */ },
                     onSelectSheepFarm: { /* objekt – uskoro */ },
                     onSelectWheatFarm: { /* objekt – uskoro */ },
+                    onSelectCornFarm: { /* objekt – uskoro */ },
                     onSelectChickenFarm: { /* objekt – uskoro */ },
                     onSelectVegetablesFarm: { /* objekt – uskoro */ },
                     onSelectGrapesFarm: { /* objekt – uskoro */ },
                     onSelectSpicesFarm: { /* objekt – uskoro */ },
                     onSelectFlowerFarm: { /* objekt – uskoro */ }
+                )
+            case .sword:
+                SwordButtonExpandedView(
+                    onSelectSwordHouse: { /* oružje – uskoro */ },
+                    onSelectShield: { /* oružje – uskoro */ },
+                    onSelectBow: { /* oružje – uskoro */ },
+                    onSelectSpear: { /* oružje – uskoro */ },
+                    onSelectLeather: { /* oružje – uskoro */ }
+                )
+            case .mine:
+                MineButtonExpandedView(
+                    onSelectLager: { /* industrija – uskoro */ },
+                    onSelectStump: { /* industrija – uskoro */ },
+                    onSelectIronMine: { /* industrija – uskoro */ },
+                    onSelectStoneMine: { /* industrija – uskoro */ },
+                    onSelectCarriage: { /* industrija – uskoro */ }
                 )
             case .tools:
                 ToolsButtonExpandedView(
@@ -339,53 +459,99 @@ struct ContentView: View {
                     onSelectShovel: { gameState.selectedToolsPanelItem = "shovel" },
                     onSelectPen: { gameState.selectedToolsPanelItem = "pen" }
                 )
-            case .sword, .mine, .cave, .food:
+            case .house:
+                HouseButtonExpandedView(
+                    onSelectHouse: { /* kuća – uskoro */ },
+                    onSelectPharmacy: { /* kuća – uskoro */ },
+                    onSelectGreenHouse: { /* kuća – uskoro */ },
+                    onSelectHotel: { /* kuća – uskoro */ },
+                    onSelectWaterWell: { /* kuća – uskoro */ },
+                    onSelectChurch: { /* kuća – uskoro */ },
+                    onSelectDiplomacy: { /* kuća – uskoro */ }
+                )
+            case .food:
+                FoodButtonExpandedView(
+                    onSelectMill: { /* hrana – uskoro */ },
+                    onSelectBrewery: { /* hrana – uskoro */ },
+                    onSelectDistillery: { /* hrana – uskoro */ },
+                    onSelectWineCellar: { /* hrana – uskoro */ },
+                    onSelectTavern: { /* hrana – uskoro */ },
+                    onSelectPantry: { /* hrana – uskoro */ },
+                    onSelectBakery: { /* hrana – uskoro */ },
+                    onSelectCanteen: { /* hrana – uskoro */ }
+                )
+            case .cave:
                 HStack(spacing: 12) {
                     Text(LocalizedStrings.string(for: "soon", language: gameState.appLanguage))
                         .font(.system(size: 10))
                         .foregroundStyle(.white.opacity(0.6))
                 }
             }
-            Button {
-                withAnimation(.easeInOut(duration: 0.28)) { expandedBottomCategory = nil }
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
         }
-        .fixedSize(horizontal: true, vertical: false)
-    }
-
-    private func titleForCategory(_ category: BottomBarCategory) -> String {
-        let key: String
-        switch category {
-        case .castle: key = "category_castle"
-        case .sword: key = "category_sword"
-        case .mine: key = "category_mine"
-        case .cave: key = "category_cave"
-        case .farm: key = "category_farm"
-        case .food: key = "category_food"
-        case .tools: key = "category_tools"
-        }
-        return LocalizedStrings.string(for: key, language: gameState.appLanguage)
+        .frame(minWidth: 280)
     }
 
     // MARK: - HUD (UX: Kamera → Postavljanje → Resursi → Izlaz)
 
+    /// Godišnje doba: lijevo godina, desno simbol. Eksplicitna animacija: stara ide dolje, nova dolazi odozgo.
+    private var seasonHUDView: some View {
+        HStack(spacing: 8) {
+            Text(verbatim: String(displayedYear))
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.95))
+
+            Spacer(minLength: 4)
+
+            ZStack {
+                // Odlazeća ikona – lagano ide prema dolje i nestaje
+                if let out = outgoingSeason {
+                    seasonIconView(out)
+                        .offset(y: seasonAnimOffset)
+                        .opacity(Double(1.0 - min(1.0, Double(seasonAnimOffset) / 36.0)))
+                }
+                // Dolazna ikona – dolazi odozgo (počinje iznad, pomakne se na mjesto)
+                seasonIconView(displayedSeason)
+                    .offset(y: outgoingSeason == nil ? 0 : CGFloat(-36) + seasonAnimOffset)
+                    .opacity(outgoingSeason == nil ? 1 : Double(min(1.0, Double(seasonAnimOffset) / 36.0)))
+            }
+            .frame(width: 22, height: 28)
+            .clipped()
+        }
+        .padding(.horizontal, 10)
+        .frame(width: 120, height: 28)
+        .clipped()
+        .background(Color(white: 0, opacity: 0.35), in: RoundedRectangle(cornerRadius: 6))
+        .help("Godina i godišnje doba")
+    }
+
+    private func seasonIconView(_ season: SeasonIcon) -> some View {
+        Group {
+            if let img = loadBarIcon(named: season.rawValue) {
+                Image(nsImage: img)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                Image(systemName: "leaf.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+        }
+        .frame(width: 22, height: 22)
+    }
+
     private var gameHUD: some View {
         MapScreenHUDBar {
-            // Mapa – gumb lijevo od kompasa (map.png)
+            // Mapa – veća ikona gumb, bez sive kutije
             Button {
                 // Akcija – npr. pregled mape / fullscreen
             } label: {
-                hudIconImage("map", fallback: "map", size: 26)
+                hudIconImage("map", fallback: "map", size: 32)
             }
             .buttonStyle(.plain)
             .help("Mapa")
+
+            // Godišnje doba (samo ikona)
+            seasonHUDView
 
             // Kompas (rotacija 90°)
             CompassCubeView(

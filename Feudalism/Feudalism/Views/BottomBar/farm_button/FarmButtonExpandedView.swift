@@ -19,6 +19,7 @@ struct FarmButtonExpandedView: View {
     var onSelectCowFarm: () -> Void
     var onSelectSheepFarm: () -> Void
     var onSelectWheatFarm: () -> Void
+    var onSelectCornFarm: () -> Void
     var onSelectChickenFarm: () -> Void
     var onSelectVegetablesFarm: () -> Void
     var onSelectGrapesFarm: () -> Void
@@ -29,9 +30,12 @@ struct FarmButtonExpandedView: View {
         VStack(alignment: .center, spacing: 0) {
             // Red ikona
             HStack(spacing: 14) {
-                AppleFarmBarButtonView(action: onSelectAppleFarm, iconOnly: true)
+                AppleFarmBarButtonView(action: onSelectAppleFarm, iconOnly: true, iconOnlySize: 40)
                     .frame(width: columnWidth, alignment: .center)
                 WheatFarmBarButtonView(action: onSelectWheatFarm, iconOnly: true)
+                    .frame(width: columnWidth, alignment: .center)
+                    .padding(.leading, 8)
+                CornFarmBarButtonView(action: onSelectCornFarm, iconOnly: true)
                     .frame(width: columnWidth, alignment: .center)
                 HayFarmBarButtonView(action: onSelectHayFarm, iconOnly: true)
                     .frame(width: columnWidth, alignment: .center)
@@ -59,6 +63,7 @@ struct FarmButtonExpandedView: View {
             HStack(spacing: 14) {
                 farmLabel("apple_farm").frame(width: columnWidth, alignment: .center)
                 farmLabel("wheat_farm").frame(width: columnWidth, alignment: .center)
+                farmLabel("corn_farm").frame(width: columnWidth, alignment: .center)
                 farmLabel("resource_hop").frame(width: columnWidth, alignment: .center)
                 farmLabel("vegetables_farm").frame(width: columnWidth, alignment: .center)
                 farmLabel("grapes_farm").frame(width: columnWidth, alignment: .center)
