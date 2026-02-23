@@ -60,6 +60,7 @@ struct MainMenuView: View {
         }
         .sheet(isPresented: $showPostavke) {
             PostavkeView()
+                .environmentObject(gameState)
         }
         .sheet(isPresented: $showGameSetup) {
             GameSetupView()

@@ -32,37 +32,49 @@ private func cardinalIndex(from rotation: CGFloat) -> Int {
     return idx < 0 ? idx + 4 : idx
 }
 
-/// Kompas: jedno slovo u sredini. Klik → +90° rotacija + promjena slova. Početno S.
+/// Kompas: jedno slovo upada u kadar, drugo ispada. Klik → odmah animacija + rotacija 90°.
 struct CompassCubeView: View {
     @Binding var mapRotation: CGFloat
     @Binding var panOffset: CGPoint
+    @StateObject private var displayState = CompassDisplayState()
 
     private let viewWidth: CGFloat = 160
     private let height: CGFloat = 24
     private let cornerRadius: CGFloat = 6
     private let twoPi = 2 * CGFloat.pi
+    private let animDuration: Double = 0.3
 
     private var currentLetter: String {
-        cardinals[cardinalIndex(from: mapRotation)]
+        if let overrideIdx = displayState.overrideIndex {
+            return cardinals[overrideIdx]
+        }
+        return cardinals[cardinalIndex(from: mapRotation)]
     }
 
     var body: some View {
         Button {
+            let currentIdx = cardinalIndex(from: mapRotation)
+            let nextIdx = (currentIdx + 1) % 4
+            withAnimation(.easeInOut(duration: animDuration)) {
+                displayState.overrideIndex = nextIdx
+            }
             var start = mapRotation
             if start >= twoPi { start = 0 }
             let target = start + .pi / 2
             let duration: TimeInterval = 0.35
             let startTime = CACurrentMediaTime()
-            let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { timer in
+            let state = displayState
+            let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { t in
                 let elapsed = CACurrentMediaTime() - startTime
-                let t = min(1.0, CGFloat(elapsed / duration))
-                let eased = easeInOutCubic(t)
+                let ti = min(1.0, CGFloat(elapsed / duration))
+                let eased = easeInOutCubic(ti)
                 var v = start + (target - start) * eased
                 while v < 0 { v += twoPi }
                 if v >= twoPi { v = 0 }
                 mapRotation = v
-                if t >= 1.0 {
-                    timer.invalidate()
+                if ti >= 1.0 {
+                    t.invalidate()
+                    DispatchQueue.main.async { state.overrideIndex = nil }
                 }
             }
             RunLoop.main.add(timer, forMode: .common)
@@ -71,12 +83,26 @@ struct CompassCubeView: View {
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(.white.opacity(0.95))
                 .frame(width: viewWidth, height: height)
+                .id(currentLetter)
+                .transition(.asymmetric(
+                    insertion: .move(edge: .leading).combined(with: .opacity),
+                    removal: .move(edge: .trailing).combined(with: .opacity)
+                ))
+                .frame(width: viewWidth, height: height)
                 .contentShape(Rectangle())
+                .animation(.easeInOut(duration: animDuration), value: currentLetter)
         }
         .buttonStyle(.plain)
         .frame(width: viewWidth, height: height)
+        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
         .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: cornerRadius))
     }
+}
+
+/// Override indeks da se slovo promijeni odmah pri kliku (animacija ulaz/izlaz preko .id(currentLetter)).
+private final class CompassDisplayState: ObservableObject {
+    @Published var overrideIndex: Int?
 }
 
 #Preview {

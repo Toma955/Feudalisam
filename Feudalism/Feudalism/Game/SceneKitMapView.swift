@@ -66,6 +66,7 @@ private final class SceneKitMapNSView: NSView {
     var scnView: SCNView?
     var onPanChange: ((CGPoint) -> Void)?
     var onZoomDelta: ((CGFloat) -> Void)?
+    var onRotationDelta: ((CGFloat) -> Void)?
     var onTiltDelta: ((CGFloat) -> Void)?
     var onClick: ((Int, Int) -> Void)?
     var isPanning = false
@@ -75,6 +76,23 @@ private final class SceneKitMapNSView: NSView {
     var hasObjectSelected: Bool = false
     /// World koordinata → (row, col) za hit na terenu (poziv iz hit testa).
     var onCellHit: ((SCNVector3) -> (row: Int, col: Int)?)?
+    /// Poziva se pri pomicanju miša – za ghost objekta (npr. zid) na kursoru.
+    var onMouseMove: ((NSPoint) -> Void)?
+    /// Desni klik (npr. otkaz place mode) – ne postavlja objekt.
+    var onRightClick: (() -> Void)?
+    /// Poziva se nakon uspješnog place da se odmah osvježe čvorovi na sceni (ne čeka updateNSView).
+    var onPlacementsDidChange: (() -> Void)?
+    private var keyMonitor: Any?
+    private var rightClickMonitor: Any?
+    private var trackingArea: NSTrackingArea?
+    /// Lijevi klik: hit test na mouseDown, poziv onClick tek na mouseUp ako nije bilo pomicanja (da se ne pomiješa s panom).
+    private var pendingClickCell: (row: Int, col: Int)?
+    private static let clickDragThreshold: CGFloat = 6
+    private var mouseDownLocation: NSPoint = .zero
+    /// Kad true: dva prsta = pan, pinch = zoom, rotacija = mapRotation. Kad false: miš (povuci = pan, scroll = zoom).
+    var useTrackpad: Bool = true
+    private var magnifyMonitor: Any?
+    private var rotateMonitor: Any?
 
     override func layout() {
         super.layout()
@@ -83,29 +101,174 @@ private final class SceneKitMapNSView: NSView {
         }
     }
 
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let ta = trackingArea {
+            removeTrackingArea(ta)
+            trackingArea = nil
+        }
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        let ta = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .activeInKeyWindow],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(ta)
+        trackingArea = ta
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        let loc = convert(event.locationInWindow, from: nil)
+        onMouseMove?(loc)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil {
+            window?.makeFirstResponder(self)
+            installKeyMonitor()
+            installRightClickMonitor()
+            installTrackpadMonitorsIfNeeded()
+        } else {
+            removeKeyMonitor()
+            removeRightClickMonitor()
+            removeTrackpadMonitors()
+        }
+    }
+
+    func installTrackpadMonitorsIfNeeded() {
+        guard useTrackpad, window != nil, magnifyMonitor == nil else { return }
+        magnifyMonitor = NSEvent.addLocalMonitorForEvents(matching: .magnify) { [weak self] event in
+            guard let self = self, self.window?.isKeyWindow == true else { return event }
+            let mag = event.magnification
+            if mag != 0 { self.onZoomDelta?(mag > 0 ? 0.12 : -0.12) }
+            return nil
+        }
+        rotateMonitor = NSEvent.addLocalMonitorForEvents(matching: .rotate) { [weak self] event in
+            guard let self = self, self.window?.isKeyWindow == true else { return event }
+            let deg = event.rotation
+            if deg != 0 { self.onRotationDelta?(CGFloat(deg) * .pi / 180) }
+            return nil
+        }
+    }
+
+    func removeTrackpadMonitors() {
+        if let m = magnifyMonitor { NSEvent.removeMonitor(m); magnifyMonitor = nil }
+        if let m = rotateMonitor { NSEvent.removeMonitor(m); rotateMonitor = nil }
+    }
+
+    private func installKeyMonitor() {
+        guard keyMonitor == nil, window != nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self, self.window != nil, self.window!.isKeyWindow else { return event }
+            return self.handleKeyDown(event) ? nil : event
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let m = keyMonitor {
+            NSEvent.removeMonitor(m)
+            keyMonitor = nil
+        }
+    }
+
+    private func installRightClickMonitor() {
+        guard rightClickMonitor == nil, window != nil else { return }
+        rightClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .rightMouseDown) { [weak self] event in
+            guard let self = self, self.window == event.window else { return event }
+            let locInView = self.convert(event.locationInWindow, from: nil)
+            if self.bounds.contains(locInView) {
+                self.onRightClick?()
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func removeRightClickMonitor() {
+        if let m = rightClickMonitor {
+            NSEvent.removeMonitor(m)
+            rightClickMonitor = nil
+        }
+    }
+
+    private func handleKeyDown(_ event: NSEvent) -> Bool {
+        switch event.keyCode {
+        case 53: onRightClick?(); return true
+        case 126: onTiltDelta?(0.06); return true
+        case 125: onTiltDelta?(-0.06); return true
+        case 0x0D: onPanChange?(CGPoint(x: 0, y: 28)); return true
+        case 0x01: onPanChange?(CGPoint(x: 0, y: -28)); return true
+        case 0x00: onPanChange?(CGPoint(x: -28, y: 0)); return true
+        case 0x02: onPanChange?(CGPoint(x: 28, y: 0)); return true
+        default: return false
+        }
+    }
+
     override var acceptsFirstResponder: Bool { true }
+    override func becomeFirstResponder() -> Bool { true }
+    override func resignFirstResponder() -> Bool { true }
+
+    /// Da container prima klikove (i postane first responder za WASD), a hit za teren radimo ručno u mouseDown.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        return bounds.contains(point) ? self : nil
+    }
+
+    /// Kad hit test ne uspije, postavi ovu poruku da parent može prikazati alert (opcionalno).
+    var onPlacementError: ((String) -> Void)?
+    /// Kopija odabranog objekta za postavljanje (ažurira se u updateNSView) da klik uvijek vidi aktualnu vrijednost.
+    var currentSelectedPlacementObjectId: String?
+
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         lastPanLocation = convert(event.locationInWindow, from: nil)
+        mouseDownLocation = lastPanLocation
+        pendingClickCell = nil
+        guard event.buttonNumber == 0 else { return }
         if handPanMode {
             isPanning = true
             NSCursor.closedHand.push()
             return
         }
-        guard !isPanning,
-              let hit = scnView?.hitTest(lastPanLocation, options: nil).first,
-              hit.node.name == "terrain",
+        if isPanning { return }
+        guard let sv = scnView else {
+            onPlacementError?("Scena nije spremna (scnView je nil).")
+            return
+        }
+        let hitPointInView = convert(lastPanLocation, to: sv)
+        guard sv.bounds.contains(hitPointInView) else {
+            onPlacementError?("Klik izvan područja mape.")
+            return
+        }
+        let hitOptions: [SCNHitTestOption: Any] = [
+            .searchMode: SCNHitTestSearchMode.all.rawValue,
+            .categoryBitMask: 1
+        ]
+        let hits = sv.hitTest(hitPointInView, options: hitOptions)
+        guard let hit = hits.first(where: { $0.node.name == "terrain" || $0.node.geometry is SCNPlane }),
               let convert = onCellHit,
-              let (row, col) = convert(hit.worldCoordinates) else { return }
-        onClick?(row, col)
+              let (row, col) = convert(hit.worldCoordinates) else {
+            if hits.isEmpty { onPlacementError?("Klik nije pogodio teren.") }
+            return
+        }
+        pendingClickCell = (row, col)
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        pendingClickCell = nil
+        onRightClick?()
     }
 
     override func mouseDragged(with event: NSEvent) {
+        guard event.buttonNumber == 0 else { return }
         let loc = convert(event.locationInWindow, from: nil)
         let dx = loc.x - lastPanLocation.x
         let dy = loc.y - lastPanLocation.y
         if !isPanning {
-            if handPanMode || hypot(dx, dy) > 3 {
+            let dist = hypot(loc.x - mouseDownLocation.x, loc.y - mouseDownLocation.y)
+            if dist > Self.clickDragThreshold { pendingClickCell = nil }
+            if handPanMode || dist > Self.clickDragThreshold {
                 isPanning = true
                 NSCursor.closedHand.push()
             } else {
@@ -117,6 +280,10 @@ private final class SceneKitMapNSView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if event.buttonNumber == 0, !isPanning, let cell = pendingClickCell {
+            onClick?(cell.row, cell.col)
+        }
+        pendingClickCell = nil
         if isPanning {
             isPanning = false
             NSCursor.closedHand.pop()
@@ -125,16 +292,23 @@ private final class SceneKitMapNSView: NSView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        let dy = event.scrollingDeltaY
-        if dy != 0 { onZoomDelta?(dy > 0 ? CGFloat(0.15) : CGFloat(-0.15)) }
+        if useTrackpad {
+            let dx = event.scrollingDeltaX
+            let dy = event.scrollingDeltaY
+            if dx != 0 || dy != 0 {
+                onPanChange?(CGPoint(x: -dx, y: -dy))
+            }
+        } else {
+            let dy = event.scrollingDeltaY
+            if dy != 0 { onZoomDelta?(dy > 0 ? CGFloat(0.15) : CGFloat(-0.15)) }
+        }
     }
 
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
+        case 53: onRightClick?()
         case 126: onTiltDelta?(0.06)
         case 125: onTiltDelta?(-0.06)
-        case 24:  onZoomDelta?(0.15)
-        case 27:  onZoomDelta?(-0.15)
         case 0x0D: onPanChange?(CGPoint(x: 0, y: 28))
         case 0x01: onPanChange?(CGPoint(x: 0, y: -28))
         case 0x00: onPanChange?(CGPoint(x: -28, y: 0))
@@ -189,6 +363,15 @@ private func cellFromMapLocalPosition(_ localPos: SCNVector3) -> (row: Int, col:
     return (row, col)
 }
 
+/// Sredina ćelije (row, col) u world koordinatama (y = 4 kao placements).
+private func worldPositionAtCell(row: Int, col: Int) -> SCNVector3 {
+    let halfW = mapWorldW / 2
+    let halfH = mapWorldH / 2
+    let x = CGFloat(col) * cellSizeW - halfW + cellSizeW / 2
+    let z = CGFloat(row) * cellSizeH - halfH + cellSizeH / 2
+    return SCNVector3(x, 4, z)
+}
+
 // MARK: - SceneKitMapView (SwiftUI)
 struct SceneKitMapView: NSViewRepresentable {
     @EnvironmentObject private var gameState: GameState
@@ -237,10 +420,12 @@ struct SceneKitMapView: NSViewRepresentable {
         planeNode.eulerAngles.x = -.pi / 2
         planeNode.position = SCNVector3(0, 0, 0)
         planeNode.name = "terrain"
+        planeNode.categoryBitMask = 1
         scene.rootNode.addChildNode(planeNode)
 
         let gridNode = SCNNode()
         gridNode.name = "grid"
+        gridNode.categoryBitMask = 1
         gridNode.position = SCNVector3Zero
         gridNode.eulerAngles = SCNVector3Zero
         refreshGrid(gridNode: gridNode, zoom: gameState.mapCameraSettings.currentZoom)
@@ -250,6 +435,7 @@ struct SceneKitMapView: NSViewRepresentable {
         placementsNode.name = "placements"
         placementsNode.position = SCNVector3Zero
         placementsNode.eulerAngles = SCNVector3Zero
+        placementsNode.categoryBitMask = 1
         scene.rootNode.addChildNode(placementsNode)
 
         // Samo kamera (i njen target) se pomiče pri panu; mapa je fiksna u sceni
@@ -287,23 +473,91 @@ struct SceneKitMapView: NSViewRepresentable {
         ambient.light?.intensity = 400
         scene.rootNode.addChildNode(ambient)
 
-        context.coordinator.scene = scene
-        context.coordinator.placementsNode = placementsNode
-        context.coordinator.cameraNode = cameraNode
-        context.coordinator.cameraTarget = cameraTarget
-        context.coordinator.pivotIndicatorNode = pivotIndicator
-        context.coordinator.gridNode = gridNode
-        context.coordinator.lastGridZoom = CGFloat(gameState.mapCameraSettings.currentZoom)
+        let coord = context.coordinator
+        coord.scene = scene
+        coord.placementsNode = placementsNode
+        coord.cameraNode = cameraNode
+        coord.cameraTarget = cameraTarget
+        coord.pivotIndicatorNode = pivotIndicator
+        coord.gridNode = gridNode
+        // Template za postavljeni zid mora biti odvojen čvor s vlastitim materijalima (tekstura).
+        if let placementWallNode = Wall.loadSceneKitNode(from: .main) {
+            let templateContainer = SCNNode()
+            placementWallNode.position = SCNVector3Zero
+            templateContainer.addChildNode(placementWallNode)
+            var (minB, maxB) = templateContainer.boundingBox
+            let dx = max(CGFloat(maxB.x - minB.x), 0.1)
+            let dz = max(CGFloat(maxB.z - minB.z), 0.1)
+            let scaleX = cellSizeW / dx
+            let scaleZ = cellSizeH / dz
+            let scaleY = min(scaleX, scaleZ)
+            placementWallNode.scale = SCNVector3(scaleX, scaleY, scaleZ)
+            coord.wallPlacementTemplate = templateContainer
+            // Ghost = klon templatea da bude ista veličina kao postavljeni zid. Dupliciraj materijale da zelena
+            // ostane samo na ghostu, a postavljeni zidovi (klonovi templatea) ostanu u originalnoj teksturi.
+            let ghostNode = templateContainer.clone()
+            duplicateMaterialsRecursive(ghostNode)
+            ghostNode.name = "ghostPlacement"
+            ghostNode.isHidden = true
+            ghostNode.categoryBitMask = 0
+            ghostNode.childNodes.forEach { $0.categoryBitMask = 0 }
+            applyTransparencyRecursive(0.6, to: ghostNode)
+            scene.rootNode.addChildNode(ghostNode)
+            coord.ghostPlacementNode = ghostNode
+        } else {
+            let ghostNode = makeGhostWallNode()
+            ghostNode.name = "ghostPlacement"
+            ghostNode.isHidden = true
+            ghostNode.categoryBitMask = 0
+            ghostNode.childNodes.forEach { $0.categoryBitMask = 0 }
+            scene.rootNode.addChildNode(ghostNode)
+            coord.ghostPlacementNode = ghostNode
+        }
+        coord.lastGridZoom = CGFloat(gameState.mapCameraSettings.currentZoom)
 
         container.onCellHit = { worldPos in
             cellFromMapLocalPosition(worldPos)
         }
 
+        container.onMouseMove = { [gameState] loc in
+            guard gameState.selectedPlacementObjectId == Wall.objectId else {
+                coord.ghostPlacementNode?.isHidden = true
+                return
+            }
+            guard let sv = container.scnView else {
+                coord.ghostPlacementNode?.isHidden = true
+                return
+            }
+            let hitPointInView = container.convert(loc, to: sv)
+            guard sv.bounds.contains(hitPointInView) else {
+                coord.ghostPlacementNode?.isHidden = true
+                return
+            }
+            let hitOptions: [SCNHitTestOption: Any] = [
+                .searchMode: SCNHitTestSearchMode.all.rawValue,
+                .categoryBitMask: 1
+            ]
+            let hits = sv.hitTest(hitPointInView, options: hitOptions)
+            guard let hit = hits.first(where: { $0.node.name == "terrain" }),
+                  let (row, col) = cellFromMapLocalPosition(hit.worldCoordinates) else {
+                coord.ghostPlacementNode?.isHidden = true
+                return
+            }
+            // Ghost = zelena (dostupno). U budućnosti: crvena kad ne može postaviti (canPlace == false).
+            let ghostColor = NSColor(red: 0.15, green: 0.95, blue: 0.25, alpha: 1)
+            applyGhostColorRecursive(coord.ghostPlacementNode, color: ghostColor, transparency: 0.55)
+            coord.ghostPlacementNode?.position = worldPositionAtCell(row: row, col: col)
+            coord.ghostPlacementNode?.isHidden = false
+        }
+
         scnView.scene = scene
         applyCamera(cameraNode: cameraNode, targetNode: cameraTarget, settings: gameState.mapCameraSettings)
         gridNode.isHidden = !showGrid
-        refreshPlacements(placementsNode, placements: gameState.gameMap.placements)
-        DispatchQueue.main.async { gameState.isLevelReady = true }
+        refreshPlacements(placementsNode, placements: gameState.gameMap.placements, wallTemplate: coord.wallPlacementTemplate)
+        DispatchQueue.main.async {
+            gameState.isLevelReady = true
+            gameState.runSoloResourceAnimationIfNeeded()
+        }
 
         container.onPanChange = { [gameState] delta in
             var s = gameState.mapCameraSettings
@@ -321,29 +575,70 @@ struct SceneKitMapView: NSViewRepresentable {
             s.tiltAngle = min(MapCameraSettings.tiltMax, max(MapCameraSettings.tiltMin, s.tiltAngle + delta))
             gameState.mapCameraSettings = s
         }
-        container.onClick = { [gameState] row, col in
-            if isEraseMode, let onRemoveAt = onRemoveAt {
+        container.onRotationDelta = { [gameState] delta in
+            var s = gameState.mapCameraSettings
+            s.mapRotation += delta
+            gameState.mapCameraSettings = s
+        }
+        container.useTrackpad = gameState.inputDevice == .trackpad
+        container.installTrackpadMonitorsIfNeeded()
+        container.onClick = { [weak container, gameState, coord] row, col in
+            guard let container else { return }
+            if container.isEraseMode, let onRemoveAt = onRemoveAt {
                 onRemoveAt(row, col)
+                if let node = coord.placementsNode {
+                    refreshPlacements(node, placements: gameState.gameMap.placements, wallTemplate: coord.wallPlacementTemplate)
+                }
                 return
             }
-            if isPlaceMode {
-                _ = gameState.placeSelectedObjectAt(row: row, col: col)
+            let objectId = container.currentSelectedPlacementObjectId ?? gameState.selectedPlacementObjectId
+            guard let objId = objectId, !objId.isEmpty else {
+                let msg = "Zid nije odabran. Prvo odaberi Dvor → Zid u donjem baru."
+                DispatchQueue.main.async { gameState.placementError = msg }
+                return
             }
+            DispatchQueue.main.async {
+                if gameState.selectedPlacementObjectId != objId {
+                    gameState.selectedPlacementObjectId = objId
+                }
+                let ok = gameState.placeSelectedObjectAt(row: row, col: col)
+                if ok, let node = coord.placementsNode {
+                    refreshPlacements(node, placements: gameState.gameMap.placements, wallTemplate: coord.wallPlacementTemplate)
+                }
+            }
+        }
+        container.onRightClick = { [gameState] in
+            DispatchQueue.main.async { gameState.selectedPlacementObjectId = nil }
+        }
+        container.onPlacementError = { [gameState] msg in
+            DispatchQueue.main.async { gameState.placementError = msg }
         }
         container.handPanMode = handPanMode
         container.isEraseMode = isEraseMode
         container.hasObjectSelected = isPlaceMode
+        container.currentSelectedPlacementObjectId = gameState.selectedPlacementObjectId
+        container.useTrackpad = gameState.inputDevice == .trackpad
+        if container.useTrackpad {
+            container.installTrackpadMonitorsIfNeeded()
+        } else {
+            container.removeTrackpadMonitors()
+        }
 
         return container
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
         guard let container = nsView as? SceneKitMapNSView,
-              let scnView = container.scnView else { return }
+              container.scnView != nil else { return }
 
         container.handPanMode = handPanMode
         container.isEraseMode = isEraseMode
         container.hasObjectSelected = isPlaceMode
+        container.currentSelectedPlacementObjectId = gameState.selectedPlacementObjectId
+
+        if let w = container.window, w.isKeyWindow, w.firstResponder != container {
+            w.makeFirstResponder(container)
+        }
 
         let coord = context.coordinator
         // Mapa (rootNode, teren, grid, placements) se NIKAD ne dira – samo kamera i target.
@@ -359,6 +654,9 @@ struct SceneKitMapView: NSViewRepresentable {
             )
             pivot.isHidden = !showPivotIndicator
         }
+        if let ghost = coord.ghostPlacementNode {
+            ghost.isHidden = gameState.selectedPlacementObjectId != Wall.objectId
+        }
         if let grid = coord.gridNode {
             grid.isHidden = !showGrid
             let zoom = gameState.mapCameraSettings.currentZoom
@@ -367,8 +665,7 @@ struct SceneKitMapView: NSViewRepresentable {
                 refreshGrid(gridNode: grid, zoom: zoom)
             }
         }
-
-        refreshPlacements(coord.placementsNode, placements: gameState.gameMap.placements)
+        // Ne osvježavaj placements ovdje – inače se pri svakom updateNSView (rotacija, zoom) cijela scena zidova gradi iznova (39 MB .obj + reapplyTexture) → pad FPS. Osvježavanje samo u onClick (place) i nakon onRemoveAt (erase).
     }
 
     /// Vizualni čvor na mjestu pivota (gdje kamera gleda) – mali disk + križ.
@@ -416,27 +713,47 @@ struct SceneKitMapView: NSViewRepresentable {
         )
     }
 
-    private func refreshPlacements(_ node: SCNNode?, placements: [Placement]) {
+    private func refreshPlacements(_ node: SCNNode?, placements: [Placement], wallTemplate: SCNNode?) {
         guard let node = node else { return }
         node.childNodes.forEach { $0.removeFromParentNode() }
-        let wallColor = NSColor(red: 0.45, green: 0.35, blue: 0.25, alpha: 0.95)
-        let halfW = mapWorldW / 2
-        let halfH = mapWorldH / 2
+        node.isHidden = false
+        let wallBoxFallback = makePlacementBoxNode()
+        wallBoxFallback.categoryBitMask = 0
         for p in placements {
             for r in p.row..<(p.row + p.height) {
                 for c in p.col..<(p.col + p.width) {
-                    let box = SCNBox(width: cellSizeW, height: 8, length: cellSizeH, chamferRadius: 0)
-                    box.firstMaterial?.diffuse.contents = wallColor
-                    let n = SCNNode(geometry: box)
-                    n.position = SCNVector3(
-                        CGFloat(c) * cellSizeW - halfW + cellSizeW / 2,
-                        4,
-                        CGFloat(r) * cellSizeH - halfH + cellSizeH / 2
-                    )
-                    node.addChildNode(n)
+                    let pos = worldPositionAtCell(row: r, col: c)
+                    if p.objectId == Wall.objectId, let template = wallTemplate?.clone(), !template.childNodes.isEmpty {
+                        var (minB, _) = template.boundingBox
+                        template.position = SCNVector3(pos.x, -CGFloat(minB.y), pos.z)
+                        template.isHidden = false
+                        template.categoryBitMask = 0
+                        template.childNodes.forEach {
+                            $0.categoryBitMask = 0
+                            $0.isHidden = false
+                        }
+                        // Ponovno primijeni teksturu na klon – SceneKit klonovi ponekad ne zadrže diffuse
+                        _ = Wall.reapplyTexture(to: template, bundle: .main)
+                        node.addChildNode(template)
+                    } else {
+                        let n = wallBoxFallback.clone()
+                        n.position = pos
+                        n.isHidden = false
+                        n.categoryBitMask = 0
+                        node.addChildNode(n)
+                    }
                 }
             }
         }
+    }
+
+    private func makePlacementBoxNode() -> SCNNode {
+        let wallColor = NSColor(red: 0.45, green: 0.35, blue: 0.25, alpha: 0.95)
+        let box = SCNBox(width: cellSizeW, height: 8, length: cellSizeH, chamferRadius: 0)
+        box.firstMaterial?.diffuse.contents = wallColor
+        box.firstMaterial?.lightingModel = .constant
+        let n = SCNNode(geometry: box)
+        return n
     }
 
     func makeCoordinator() -> Coordinator {
@@ -450,6 +767,66 @@ struct SceneKitMapView: NSViewRepresentable {
         var cameraTarget: SCNNode?
         var pivotIndicatorNode: SCNNode?
         var gridNode: SCNNode?
+        var ghostPlacementNode: SCNNode?
+        var wallPlacementTemplate: SCNNode?
         var lastGridZoom: CGFloat = 1
+    }
+
+    /// Ghost 3D zid koji prati kursor – samo .obj zid, bez kocke; skaliran točno na ćeliju 1×1, poluproziran.
+    private func makeGhostWallNode() -> SCNNode {
+        let container = SCNNode()
+        guard let wallNode = Wall.loadSceneKitNode(from: .main) else {
+            return container
+        }
+        wallNode.position = SCNVector3Zero
+        container.addChildNode(wallNode)
+        var (minB, maxB) = container.boundingBox
+        let dx = max(CGFloat(maxB.x - minB.x), 0.1)
+        let dz = max(CGFloat(maxB.z - minB.z), 0.1)
+        let scaleX = cellSizeW / dx
+        let scaleZ = cellSizeH / dz
+        let scaleY = min(scaleX, scaleZ)
+        wallNode.scale = SCNVector3(scaleX, scaleY, scaleZ)
+        applyTransparencyRecursive(0.6, to: container)
+        return container
+    }
+
+    private func applyTransparencyRecursive(_ value: CGFloat, to node: SCNNode) {
+        node.geometry?.materials.forEach { $0.transparency = value }
+        node.childNodes.forEach { applyTransparencyRecursive(value, to: $0) }
+    }
+
+    /// Ghost je klon templatea – SceneKit clone() dijeli geometry i materijale. Da zelena ostane samo na ghostu,
+    /// ghost mora imati vlastitu kopiju geometryja i materijala (inače mijenjamo i template i već postavljene zidove).
+    private func duplicateMaterialsRecursive(_ node: SCNNode) {
+        if let geo = node.geometry, !geo.materials.isEmpty, let newGeo = geo.copy() as? SCNGeometry {
+            newGeo.materials = geo.materials.map { old in
+                let m = SCNMaterial()
+                m.diffuse.contents = old.diffuse.contents
+                m.emission.contents = old.emission.contents
+                m.ambient.contents = old.ambient.contents
+                m.specular.contents = old.specular.contents
+                m.transparency = old.transparency
+                m.isDoubleSided = old.isDoubleSided
+                m.lightingModel = old.lightingModel
+                m.diffuse.wrapS = old.diffuse.wrapS
+                m.diffuse.wrapT = old.diffuse.wrapT
+                return m
+            }
+            node.geometry = newGeo
+        }
+        node.childNodes.forEach { duplicateMaterialsRecursive($0) }
+    }
+
+    /// Postavi boju ghost zida: zelena = dostupno (za sada uvijek zelena; kasnije + crvena kad ne može).
+    private func applyGhostColorRecursive(_ node: SCNNode?, color: NSColor, transparency: CGFloat = 0.55) {
+        guard let node = node else { return }
+        node.geometry?.materials.forEach { mat in
+            mat.diffuse.contents = color
+            mat.emission.contents = NSColor(white: 0, alpha: 0)
+            mat.transparency = transparency
+            mat.lightingModel = .constant
+        }
+        node.childNodes.forEach { applyGhostColorRecursive($0, color: color, transparency: transparency) }
     }
 }

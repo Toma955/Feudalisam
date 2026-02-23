@@ -8,6 +8,18 @@
 import Foundation
 import SwiftUI
 
+/// Ulazni uređaj za upravljanje – u General postavkama; kasnije posebne funkcije za trackpad i miš.
+enum InputDevice: String, CaseIterable {
+    case trackpad = "trackpad"
+    case mouse = "mouse"
+    var displayName: String {
+        switch self {
+        case .trackpad: return "Trackpad"
+        case .mouse: return "Miš"
+        }
+    }
+}
+
 /// Način igre: jedan kraj = solo; više = natjecateljski (pobijedi onaj koji zadnji ostane).
 enum GameMode {
     /// Jedan realm na mapi – solo igra.
@@ -53,8 +65,30 @@ final class GameState: ObservableObject {
     /// Mapa mape – grid u 1×1 jedinicama (100×100, 200×200 ili 1000×1000).
     @Published var gameMap: GameMap
 
+    /// Povećava se pri svakom place/remove da SwiftUI sigurno ažurira prikaz mape.
+    @Published private(set) var placementsVersion: Int = 0
+
+    /// Ako postavljanje objekta ne uspije, ovdje je poruka za alert. Postavi na nil nakon prikaza.
+    @Published var placementError: String?
+
+    /// Status učitavanja teksture zida (prikazuje se u Map Editoru). nil = još nije provjereno.
+    @Published var wallTextureStatus: String?
+
+    /// Da se animacija resursa 0→100 u solo modu pokrene samo jednom kad se level učita.
+    private var hasRunSoloResourceAnimation = false
+    private var soloResourceAnimationWorkItem: DispatchWorkItem?
+
+    private static let inputDeviceKey = "Feudalism.inputDevice"
+
+    /// Trackpad ili miš – u Postavkama → General; kasnije posebne funkcije po uređaju.
+    @Published var inputDevice: InputDevice {
+        didSet { UserDefaults.standard.set(inputDevice.rawValue, forKey: Self.inputDeviceKey) }
+    }
+
     init(mapSize: MapSizePreset = .small) {
         self.gameMap = mapSize.makeGameMap()
+        let raw = UserDefaults.standard.string(forKey: Self.inputDeviceKey) ?? InputDevice.trackpad.rawValue
+        self.inputDevice = InputDevice(rawValue: raw) ?? .trackpad
     }
 
     // MARK: - Način igre
@@ -125,19 +159,45 @@ final class GameState: ObservableObject {
         playerRealmId = newRealms.first { $0.isPlayerControlled }?.id
     }
 
-    /// Postavi trenutno odabrani objekt na (row, col). Vraća true ako je uspjelo.
+    /// Postavi trenutno odabrani objekt na (row, col). Vraća true ako je uspjelo. U igri (ne Map Editor) troši resurse prema BuildCosts.
     func placeSelectedObjectAt(row: Int, col: Int) -> Bool {
-        guard let objectId = selectedPlacementObjectId else { return false }
+        placementError = nil
+        guard let objectId = selectedPlacementObjectId else {
+            let msg = "Nije odabran objekt za postavljanje. Prvo odaberi Zid (Dvor → Zid)."
+            placementError = msg
+            return false
+        }
+        if !isMapEditorMode {
+            let cost = BuildCosts.shared.cost(for: objectId)
+            if !BuildCosts.shared.canAfford(objectId: objectId, stone: stone, wood: wood, iron: iron) {
+                placementError = "Nedovoljno resursa. Potrebno: \(cost.stone) kamen, \(cost.wood) drvo, \(cost.iron) željezo."
+                return false
+            }
+        }
         let obj = ObjectCatalog.shared.object(id: objectId)
         let width = obj?.size.width ?? 1
         let height = obj?.size.height ?? 1
-        return gameMap.place(objectId: objectId, width: width, height: height, atRow: row, col: col) != nil
+        guard let _ = gameMap.place(objectId: objectId, width: width, height: height, atRow: row, col: col) else {
+            let msg = "Ne može se staviti na (\(row), \(col)) – ćelija zauzeta ili izvan mape \(gameMap.rows)×\(gameMap.cols)."
+            placementError = msg
+            return false
+        }
+        if !isMapEditorMode {
+            let cost = BuildCosts.shared.cost(for: objectId)
+            stone -= cost.stone
+            wood -= cost.wood
+            iron -= cost.iron
+        }
+        placementsVersion += 1
+        objectWillChange.send()
+        return true
     }
 
     /// Ukloni placement koji pokriva danu koordinatu (Map Editor – alat za brisanje).
     func removePlacement(at coordinate: MapCoordinate) {
         guard let p = gameMap.placement(at: coordinate) else { return }
         gameMap.removePlacement(id: p.id)
+        placementsVersion += 1
         objectWillChange.send()
     }
 
@@ -196,10 +256,16 @@ final class GameState: ObservableObject {
         isShowingMainMenu = true
     }
 
-    /// Pokreni novu igru – skriva izbornik, prikazuje karticu. Level se učitava u pozadini; isLevelReady postavlja GameScene.
+    /// Pokreni novu igru – skriva izbornik, prikazuje karticu. Resursi se u solo modu animiraju 0→100 kad se level učita.
     func startNewGame() {
         isLevelReady = false
         isShowingMainMenu = false
+        hasRunSoloResourceAnimation = false
+        if isSoloMode {
+            stone = 0
+            wood = 0
+            iron = 0
+        }
     }
 
     /// Dodaj sebe (human lord) i odabrane AI lordove, pa pokreni igru. Solo = samo ti, mapa 100×100.
@@ -225,6 +291,30 @@ final class GameState: ObservableObject {
         setRealms(newRealms)
         setMapSize(.small)
         startNewGame()
+    }
+
+    /// Pozovi kad je level učitan (isLevelReady = true). U solo igri (ne Map Editor) animira kamen, drvo i željezo od 0 do 100 (jednom).
+    func runSoloResourceAnimationIfNeeded() {
+        guard isSoloMode, !isMapEditorMode, !hasRunSoloResourceAnimation else { return }
+        hasRunSoloResourceAnimation = true
+        soloResourceAnimationWorkItem?.cancel()
+        runSoloResourceAnimationStep(step: 0, steps: 50, interval: 1.5 / 50, stepAmount: 2)
+    }
+
+    private func runSoloResourceAnimationStep(step: Int, steps: Int, interval: TimeInterval, stepAmount: Int) {
+        let value = min(100, step * stepAmount)
+        DispatchQueue.main.async { [weak self] in
+            self?.stone = value
+            self?.wood = value
+            self?.iron = value
+        }
+        guard step < steps else { return }
+        let next = step + 1
+        let work = DispatchWorkItem { [weak self] in
+            self?.runSoloResourceAnimationStep(step: next, steps: steps, interval: interval, stepAmount: stepAmount)
+        }
+        soloResourceAnimationWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + interval, execute: work)
     }
 
     /// Promijeni veličinu mape (nova igra).

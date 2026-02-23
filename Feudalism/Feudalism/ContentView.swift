@@ -57,36 +57,8 @@ private func imageWithTransparentWhiteBackground(_ image: NSImage, whiteThreshol
     return outImage
 }
 
-/// Jednom pri pokretanju ispiše u konzolu zašto ikone (farm, food, castle, sword) nisu vidljive.
 private func printIconDiagnostics() {
-    let names = ["farm", "food", "castle", "sword"]
-    print("---------- [Ikone] Dijagnostika ----------")
-    if let rp = Bundle.main.resourcePath {
-        print("[Ikone] Bundle resource path: \(rp)")
-    }
-    for sub in ["Icons", "Feudalism/Icons", "icons"] {
-        if let url = Bundle.main.resourceURL?.appendingPathComponent(sub),
-           (try? url.checkResourceIsReachable()) == true,
-           let contents = try? FileManager.default.contentsOfDirectory(atPath: url.path) {
-            print("[Ikone] Mapа '\(sub)' u bundleu sadrži: \(contents.sorted().joined(separator: ", "))")
-        } else {
-            print("[Ikone] Mapа '\(sub)' u bundleu: NE POSTOJI ili je prazna")
-        }
-    }
-    for name in names {
-        let fromAsset = NSImage(named: name)
-        let fromIconsURL = Bundle.main.url(forResource: name, withExtension: "png", subdirectory: "Icons")
-            ?? Bundle.main.url(forResource: name, withExtension: "png", subdirectory: "Feudalism/Icons")
-        let fromIcons = fromIconsURL.flatMap { NSImage(contentsOf: $0) }
-        if fromAsset != nil {
-            print("[Ikone] \(name): OK iz Assets.xcassets (NSImage(named:))")
-        } else if fromIcons != nil {
-            print("[Ikone] \(name): OK iz mape Icons (\(fromIconsURL!.lastPathComponent))")
-        } else {
-            print("[Ikone] \(name): NIJE NAĐEN – NSImage(named:) = nil, u Icons: \(fromIconsURL != nil ? "datoteka postoji ali NSImage ne učitava" : "datoteka nije u bundleu (dodaj Icons u Copy Bundle Resources u Xcodeu)")")
-        }
-    }
-    print("---------- [Ikone] Kraj ----------")
+    // Bez ispisa u produkciji
 }
 
 /// Učita NSImage za ikonu: prvo iz Assets.xcassets, pa iz mape Icons/icons u bundleu.
@@ -145,10 +117,10 @@ private struct BarIcon: View {
                     .scaledToFit()
             } else {
                 Image(systemName: systemName)
-                    .font(.system(size: 34))
+                    .font(.system(size: 28))
             }
         }
-        .frame(width: 58, height: 58)
+        .frame(width: 48, height: 48)
         .foregroundStyle(.white.opacity(0.95))
     }
 }
@@ -159,15 +131,79 @@ private enum ResourceStripMode {
     case food       // kruh, hmelj, žito
 }
 
+/// Boja za postotak: 100 zeleno, 80–100 blago zeleno, 50–80 žuto, ispod 50 crveno; 0/0 tamnocrveno.
+private func colorForPercent(_ percent: Int, isEmpty: Bool) -> Color {
+    if isEmpty { return Color(red: 0.55, green: 0.15, blue: 0.12) }
+    switch percent {
+    case 100: return Color(red: 0.2, green: 0.75, blue: 0.3)
+    case 80..<100: return Color(red: 0.45, green: 0.75, blue: 0.4)
+    case 50..<80: return Color(red: 0.9, green: 0.75, blue: 0.2)
+    default: return Color(red: 0.85, green: 0.25, blue: 0.2)
+    }
+}
+
+/// HUD element: current/max (max 999/999) na sredini, vertikalna linija, postotak s bojom (0/0 = tamnocrveno).
+private struct HUDScoreView: View {
+    let current: Int
+    let max: Int
+
+    private static let viewWidth: CGFloat = 160
+    private static let height: CGFloat = 24
+    private static let cornerRadius: CGFloat = 6
+
+    private var currentClamped: Int { min(999, Swift.max(0, current)) }
+    private var maxClamped: Int { min(999, Swift.max(0, max)) }
+    private var percent: Int {
+        guard maxClamped > 0 else { return 0 }
+        return min(100, (currentClamped * 100) / maxClamped)
+    }
+    private var isEmpty: Bool { maxClamped == 0 }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text("\(currentClamped)/\(maxClamped)")
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+
+            Rectangle()
+                .fill(.white.opacity(0.4))
+                .frame(width: 1, height: 14)
+
+            Text("\(percent)%")
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white)
+                .frame(minWidth: 36)
+                .padding(.leading, 6)
+        }
+        .padding(.trailing, 8)
+        .frame(width: Self.viewWidth, height: Self.height)
+        .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: Self.cornerRadius))
+    }
+}
+
+/// Donji bar: kategorija koja je otvorena (nil = sve ikone, inače island s pod-ikonama).
+private enum BottomBarCategory: String, CaseIterable {
+    case castle
+    case sword
+    case mine
+    case farm
+    case food
+}
+
 struct ContentView: View {
     @EnvironmentObject private var gameState: GameState
     @State private var showMinijatureWall = false
+    @State private var expandedBottomCategory: BottomBarCategory? = nil
     @State private var showGrid = true
     @State private var handPanMode = false
     @State private var showPivotIndicator = false
     @State private var showSettingsPopover = false
     /// resources = drvo, kamen, željezo; food = kruh, hmelj, žito
     @State private var resourceStripMode: ResourceStripMode = .resources
+    /// HUD ispis 0/0 i postotak – mijenjaju se iz logike (npr. populacija / kapacitet).
+    @State private var hudScoreCurrent: Int = 0
+    @State private var hudScoreMax: Int = 0
 
     var body: some View {
         ZStack {
@@ -179,45 +215,18 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea()
 
-            // Dno: sivi zaobljeni okvir s ikonama (castle, sword, mine, farm, food)
+            // Dno: island – 5 ikona ili prošireni sivi element s pod-ikonama (npr. zid za castle)
             VStack {
                 Spacer()
-                HStack(spacing: 24) {
-                    Button { showMinijatureWall = true } label: { BarIcon(assetName: "castle", systemName: "building.columns.fill") }
-                    .buttonStyle(.plain)
-                    Button { } label: { BarIcon(assetName: "sword", systemName: "crossed.swords") }
-                    .buttonStyle(.plain)
-                    Button { } label: { BarIcon(assetName: "mine", systemName: "hammer.fill") }
-                    .buttonStyle(.plain)
-                    Button { } label: { BarIcon(assetName: "farm", systemName: "leaf.fill") }
-                    .buttonStyle(.plain)
-                    Button { } label: { BarIcon(assetName: "food", systemName: "fork.knife") }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal, 28)
-                .padding(.vertical, 18)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
-                .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.25), lineWidth: 1))
-                .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 4)
-                .padding(.bottom, 28)
+                bottomBarContent
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 14)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+                    .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.25), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 4)
+                    .padding(.bottom, 24)
+                    .animation(.easeInOut(duration: 0.28), value: expandedBottomCategory)
             }
-
-            // Zoom – donji lijevi kut, da vidiš koliko je zumirano
-            VStack {
-                Spacer()
-                HStack {
-                    Text("Zoom \(String(format: "%.1f×", gameState.mapCameraSettings.currentZoom))")
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 6))
-                    Spacer(minLength: 0)
-                }
-                .padding(.leading, 16)
-                .padding(.bottom, 100)
-            }
-            .allowsHitTesting(false)
 
             // HUD – jedna traka gore: Kamera | Postavljanje | Resursi | Izlaz
             VStack(spacing: 0) {
@@ -236,6 +245,77 @@ struct ContentView: View {
             }
         }
         .onAppear { printIconDiagnostics() }
+    }
+
+    /// Donji bar: ili 5 ikona (castle, sword, mine, farm, food) ili prošireni island s pod-ikonama.
+    @ViewBuilder
+    private var bottomBarContent: some View {
+        if let category = expandedBottomCategory {
+            expandedBottomBar(category: category)
+        } else {
+            HStack(spacing: 24) {
+                ForEach(BottomBarCategory.allCases, id: \.self) { cat in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.28)) { expandedBottomCategory = cat }
+                    } label: { barIcon(for: cat) }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func barIcon(for category: BottomBarCategory) -> some View {
+        switch category {
+        case .castle: return BarIcon(assetName: "castle", systemName: "building.columns.fill")
+        case .sword: return BarIcon(assetName: "sword", systemName: "crossed.swords")
+        case .mine: return BarIcon(assetName: "mine", systemName: "hammer.fill")
+        case .farm: return BarIcon(assetName: "farm", systemName: "leaf.fill")
+        case .food: return BarIcon(assetName: "food", systemName: "fork.knife")
+        }
+    }
+
+    /// Prošireni island: ikone + strelica za povratak (bez naslova i bez natpisa).
+    private func expandedBottomBar(category: BottomBarCategory) -> some View {
+        VStack(spacing: 6) {
+            switch category {
+            case .castle:
+                HStack(spacing: 12) {
+                    Button {
+                        gameState.selectedPlacementObjectId = Wall.objectId
+                        // Izbornik ostaje otvoren – zatvori ga tek kad klikneš Nazad (chevron)
+                    } label: {
+                        VStack(spacing: 2) {
+                            BarIcon(assetName: "wall", systemName: "rectangle.3.group")
+                            Text("Zid").font(.system(size: 10)).foregroundStyle(.white.opacity(0.9))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            case .sword, .mine, .farm, .food:
+                HStack(spacing: 12) {
+                    Text("Uskoro").font(.system(size: 10)).foregroundStyle(.white.opacity(0.6))
+                }
+            }
+            Button {
+                withAnimation(.easeInOut(duration: 0.28)) { expandedBottomCategory = nil }
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(width: 356, height: 96)
+    }
+
+    private func titleForCategory(_ category: BottomBarCategory) -> String {
+        switch category {
+        case .castle: return "Dvor"
+        case .sword: return "Oružje"
+        case .mine: return "Rudnik"
+        case .farm: return "Farma"
+        case .food: return "Hrana"
+        }
     }
 
     /// Prekriva ekran dok se level (mapa, teren) učitava; nestaje kad GameScene pozove onLevelReady.
@@ -264,7 +344,27 @@ struct ContentView: View {
             HStack {
                 Spacer(minLength: 0)
                 HStack(spacing: 16) {
-                    // Zoom – 4 faze (ostaje na traci)
+                    // Kompas (lijevo od zooma) – rotacija 90°
+                    CompassCubeView(
+                        mapRotation: Binding(
+                            get: { gameState.mapCameraSettings.mapRotation },
+                            set: { new in
+                                var s = gameState.mapCameraSettings
+                                s.mapRotation = new
+                                gameState.mapCameraSettings = s
+                            }
+                        ),
+                        panOffset: Binding(
+                            get: { gameState.mapCameraSettings.panOffset },
+                            set: { new in
+                                var s = gameState.mapCameraSettings
+                                s.panOffset = new
+                                gameState.mapCameraSettings = s
+                            }
+                        )
+                    )
+
+                    // Zoom – 4 faze (šuma, 3 stabla, 1 stablo, list)
                     ZoomPhaseView(mapCameraSettings: Binding(
                         get: { gameState.mapCameraSettings },
                         set: { gameState.mapCameraSettings = $0 }
@@ -294,25 +394,8 @@ struct ContentView: View {
 
                     hudDivider
 
-                    // Kamera – kompas (rotacija 90°)
-                    CompassCubeView(
-                        mapRotation: Binding(
-                            get: { gameState.mapCameraSettings.mapRotation },
-                            set: { new in
-                                var s = gameState.mapCameraSettings
-                                s.mapRotation = new
-                                gameState.mapCameraSettings = s
-                            }
-                        ),
-                        panOffset: Binding(
-                            get: { gameState.mapCameraSettings.panOffset },
-                            set: { new in
-                                var s = gameState.mapCameraSettings
-                                s.panOffset = new
-                                gameState.mapCameraSettings = s
-                            }
-                        )
-                    )
+                    // 0/0 i postotak (tamnocrveno kad 0/0); max 999/999; linija između; boja po postotku
+                    HUDScoreView(current: hudScoreCurrent, max: hudScoreMax)
 
                     hudDivider
 
@@ -344,12 +427,6 @@ struct ContentView: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)
-
-            Text("WASD pomicanje  ·  +/− zoom")
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.5))
-                .padding(.top, 6)
-                .padding(.bottom, 4)
         }
     }
 

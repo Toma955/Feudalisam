@@ -15,6 +15,8 @@ struct MapEditorView: View {
     @State private var eraseMode = false
     @State private var saveLoadMessage: String?
     @State private var showSaveLoadAlert = false
+    @State private var showTextureStatusAlert = false
+    @State private var textureStatusMessage = ""
 
     var body: some View {
         ZStack {
@@ -37,6 +39,29 @@ struct MapEditorView: View {
             if !gameState.isLevelReady {
                 levelLoadingOverlay
             }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if let status = gameState.wallTextureStatus {
+                Text(status)
+                    .font(.caption.monospaced())
+                    .padding(8)
+                    .background(.black.opacity(0.7))
+                    .foregroundStyle(status.contains("Uspješno") || status.hasSuffix("OK") ? .green : .orange)
+                    .cornerRadius(6)
+                    .padding(12)
+            }
+        }
+        .onAppear {
+            let (ok, message) = Wall.checkAndLogTextureStatus(bundle: .main)
+            let status = ok ? "Tekstura zida je uspješno učitana i primijenjena." : "Tekstura zida nije učitana: \(message)"
+            gameState.wallTextureStatus = ok ? "Tekstura zida: OK" : "Tekstura zida: \(message)"
+            textureStatusMessage = status
+            showTextureStatusAlert = true
+        }
+        .alert("Status teksture zida", isPresented: $showTextureStatusAlert) {
+            Button("OK") { showTextureStatusAlert = false }
+        } message: {
+            Text(textureStatusMessage)
         }
         .alert("Map Editor", isPresented: $showSaveLoadAlert) {
             Button("OK") { showSaveLoadAlert = false }
