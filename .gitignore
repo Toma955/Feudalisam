@@ -39,6 +39,8 @@ Pods/
 # Carthage
 Carthage/Build/
 
+# Svi .obj modeli – samo lokalno (build koristi iz Core/Objects/), ne na GitHub; datoteke se NE brišu s diska
+Feudalism/Feudalism/Core/Objects/**/*.obj
 # Veliki 3D modeli (preko GitHub limita 100 MB) – drži lokalno, build kopira iz Core/Objects/
 Feudalism/Feudalism/Core/Objects/Market/Meshy_AI_market_0223090758_texture.obj
 # Svi veliki .obj i texture objekti (preko 100 MB) – ne pushati na GitHub
