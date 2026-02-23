@@ -8,14 +8,13 @@
 import Foundation
 import CoreGraphics
 
-/// Faze zooma: 1 = šuma (2.1), 2 = stablo (14), 3 = tri stabla (29.5), 4 = list (38.0).
+/// Faze zooma: 3 razine. 1 = šuma (2×), 2 = tri stabla (8×), 3 = jedno stablo (14×).
 enum ZoomPhase: Int, CaseIterable {
-    case forest = 1      // 2.1
-    case oneTree = 2     // 14
-    case threeTrees = 3  // 29.5
-    case leaf = 4        // 38.0
+    case forest = 1      // 2× min
+    case threeTrees = 2  // 8× srednji
+    case oneTree = 3     // 14× max
 
-    static let zoomValues: [CGFloat] = [2.1, 14.0, 29.5, 38.0]
+    static let zoomValues: [CGFloat] = [2.0, 8.0, 14.0]
 
     var zoomValue: CGFloat {
         ZoomPhase.zoomValues[rawValue - 1]
@@ -34,31 +33,31 @@ struct MapCameraSettings {
     static let tiltMax: CGFloat = 60 * .pi / 180
     /// Koliko piksela se mapa pomakne po jednom pritisku tipke (WASD / strelice).
     var panSpeed: CGFloat = 28
-    /// Minimalni zoom (faza 1 = 2.1).
+    /// Minimalni zoom (faza 1 = 2×).
     var zoomMin: CGFloat { ZoomPhase.zoomValues[0] }
-    /// Maksimalni zoom (faza 4 = 38).
-    var zoomMax: CGFloat { ZoomPhase.zoomValues[3] }
-    /// Faza zooma 1–4 (1 stablo, 2, 3, šuma). Na početku 2.
+    /// Maksimalni zoom (faza 3 = 14×).
+    var zoomMax: CGFloat { ZoomPhase.zoomValues[2] }
+    /// Faza zooma 1–3 (1 = šuma 2×, 2 = tri stabla 8×, 3 = jedno stablo 14×). Na početku 2.
     var zoomPhase: Int = 2
-    /// Smjer za sljedeći klik (ping-pong: 2→3→4→3→2→1→2→…).
+    /// Smjer za sljedeći klik (ping-pong 1↔2↔3).
     var zoomDirectionUp: Bool = true
-    /// Trenutni zoom – izveden iz zoomPhase (2.1, 14, 26, 38).
-    var currentZoom: CGFloat = 14.0
+    /// Trenutni zoom – izveden iz zoomPhase (2, 8, 14).
+    var currentZoom: CGFloat = 8.0
 
-    /// Postavi fazu 1–4 i ažurira currentZoom.
+    /// Postavi fazu 1–3 i ažurira currentZoom.
     mutating func setZoomPhase(_ phase: Int) {
-        let p = min(4, max(1, phase))
+        let p = min(3, max(1, phase))
         zoomPhase = p
         currentZoom = ZoomPhase.zoomValues[p - 1]
     }
 
-    /// Jedan korak na gumb (ping-pong): 2→3→4→3→2→1→2→…
+    /// Jedan korak na gumb (ping-pong): 1↔2↔3.
     mutating func stepZoomPhaseByClick() {
         if zoomDirectionUp {
-            if zoomPhase < 4 {
+            if zoomPhase < 3 {
                 setZoomPhase(zoomPhase + 1)
             } else {
-                setZoomPhase(3)
+                setZoomPhase(2)
                 zoomDirectionUp = false
             }
         } else {
@@ -74,8 +73,8 @@ struct MapCameraSettings {
     /// Jedan korak scroll / +/- prema većem ili manjem zoomu.
     mutating func stepZoomPhaseByScroll(zoomIn: Bool) {
         if zoomIn {
-            setZoomPhase(min(4, zoomPhase + 1))
-            if zoomPhase == 4 { zoomDirectionUp = false }
+            setZoomPhase(min(3, zoomPhase + 1))
+            if zoomPhase == 3 { zoomDirectionUp = false }
         } else {
             setZoomPhase(max(1, zoomPhase - 1))
             if zoomPhase == 1 { zoomDirectionUp = true }

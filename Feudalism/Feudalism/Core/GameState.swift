@@ -79,16 +79,35 @@ final class GameState: ObservableObject {
     private var soloResourceAnimationWorkItem: DispatchWorkItem?
 
     private static let inputDeviceKey = "Feudalism.inputDevice"
+    private static let audioMusicVolumeKey = "Feudalism.audioMusicVolume"
+    private static let audioSoundsVolumeKey = "Feudalism.audioSoundsVolume"
+    private static let audioSpeechVolumeKey = "Feudalism.audioSpeechVolume"
 
     /// Trackpad ili miš – u Postavkama → General; kasnije posebne funkcije po uređaju.
     @Published var inputDevice: InputDevice {
         didSet { UserDefaults.standard.set(inputDevice.rawValue, forKey: Self.inputDeviceKey) }
     }
 
+    /// Glasnoća muzike mape (0...1). Postavke → Audio.
+    @Published var audioMusicVolume: Double {
+        didSet { UserDefaults.standard.set(audioMusicVolume, forKey: Self.audioMusicVolumeKey) }
+    }
+    /// Glasnoća zvukova (0...1). Postavke → Audio.
+    @Published var audioSoundsVolume: Double {
+        didSet { UserDefaults.standard.set(audioSoundsVolume, forKey: Self.audioSoundsVolumeKey) }
+    }
+    /// Glasnoća govora (0...1). Postavke → Audio.
+    @Published var audioSpeechVolume: Double {
+        didSet { UserDefaults.standard.set(audioSpeechVolume, forKey: Self.audioSpeechVolumeKey) }
+    }
+
     init(mapSize: MapSizePreset = .small) {
         self.gameMap = mapSize.makeGameMap()
         let raw = UserDefaults.standard.string(forKey: Self.inputDeviceKey) ?? InputDevice.trackpad.rawValue
         self.inputDevice = InputDevice(rawValue: raw) ?? .trackpad
+        self.audioMusicVolume = UserDefaults.standard.object(forKey: Self.audioMusicVolumeKey) as? Double ?? 0.6
+        self.audioSoundsVolume = UserDefaults.standard.object(forKey: Self.audioSoundsVolumeKey) as? Double ?? 0.8
+        self.audioSpeechVolume = UserDefaults.standard.object(forKey: Self.audioSpeechVolumeKey) as? Double ?? 0.8
     }
 
     // MARK: - Način igre

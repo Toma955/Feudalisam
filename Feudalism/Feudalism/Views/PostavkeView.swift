@@ -67,13 +67,36 @@ struct PostavkeView: View {
     private var audioContent: some View {
         Form {
             Section {
-                Text("Postavke zvuka – u izradi.")
+                VStack(alignment: .leading, spacing: 12) {
+                    volumeRow(title: "Muzika mape", icon: "music.note", value: $gameState.audioMusicVolume)
+                    volumeRow(title: "Zvukovi", icon: "speaker.wave.2.fill", value: $gameState.audioSoundsVolume)
+                    volumeRow(title: "Govor", icon: "person.wave.2.fill", value: $gameState.audioSpeechVolume)
+                }
+                Text("Muzika mape pušta se na karti u igri. Za reprodukciju dodaj map_music.mp3 u Copy Bundle Resources.")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+            } header: {
+                Text("Glasnoće")
             }
         }
         .formStyle(.grouped)
         .padding()
         .navigationTitle("Audio")
+    }
+
+    private func volumeRow(title: String, icon: String, value: Binding<Double>) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .frame(width: 24, alignment: .center)
+                .foregroundStyle(.secondary)
+            Slider(value: value, in: 0...1, step: 0.05)
+                .frame(maxWidth: 280)
+            Text("\(Int(value.wrappedValue * 100))%")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 36, alignment: .trailing)
+        }
+        .padding(.vertical, 2)
     }
 
     private var videoContent: some View {

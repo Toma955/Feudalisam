@@ -26,6 +26,8 @@ struct FeudalismApp: App {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.black)
             .environmentObject(gameState)
+            .onChange(of: gameState.isShowingMainMenu) { if $0 { AudioManager.shared.stopMapMusic() } }
+            .onChange(of: gameState.isMapEditorMode) { if $0 { AudioManager.shared.stopMapMusic() } }
         }
         .windowStyle(.automatic)
         .defaultSize(width: 1920, height: 1080)

@@ -78,12 +78,20 @@ private func loadResourceIcon(named name: String) -> NSImage? {
     loadBarIcon(named: name)
 }
 
-/// Jedan resurs u HUD-u: ikona iz Icons + broj. Ikone u izvornim bojama. iconSize: veličina ikone (default 44, manje = niža traka).
+/// Max prikazivani broj za resurse (novac do 999999; fiksna širina 6 znamenki – traka se ne mijenja).
+private let resourceMaxDisplay = 999_999
+
+/// Širina za broj (6 znamenki: 999999).
+private let resourceDigitWidth: CGFloat = 56
+
+/// Jedan resurs u HUD-u: ikona + broj. Broj uvijek u fiksnoj širini (do 6 znamenki) da se traka ne mijenja.
 private struct ResourceRow: View {
     let iconName: String
     let value: Int
     var iconSize: CGFloat = 44
+    var systemFallback: String = "cube.fill"
     private var image: NSImage? { loadResourceIcon(named: iconName) }
+    private var displayValue: Int { min(resourceMaxDisplay, max(0, value)) }
     var body: some View {
         HStack(spacing: 4) {
             if let img = image {
@@ -92,15 +100,18 @@ private struct ResourceRow: View {
                     .scaledToFit()
                     .frame(width: iconSize, height: iconSize)
             } else {
-                Image(systemName: "cube.fill")
+                Image(systemName: systemFallback)
                     .font(.system(size: iconSize * 0.6))
                     .foregroundStyle(.white.opacity(0.95))
             }
-            Text("\(value)")
+            Text("\(displayValue)")
                 .font(.system(size: 16, weight: .medium, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.95))
+                .frame(width: resourceDigitWidth, alignment: .trailing)
         }
+        .frame(width: ResourceRow.fixedWidth(iconSize: iconSize))
     }
+    static func fixedWidth(iconSize: CGFloat) -> CGFloat { iconSize + 4 + resourceDigitWidth }
 }
 
 /// Ikona s asseta ili iz mape Icons; inače SF Symbol. Nazivi: farm, food, castle, sword.
@@ -125,9 +136,9 @@ private struct BarIcon: View {
     }
 }
 
-/// Što prikazuje traka resursa: Resources = drvo, kamen, željezo; Food = kruh, hmelj, žito.
+/// Što prikazuje traka resursa: Resources = novci (zlato), drvo, kamen, željezo; Food = kruh, hmelj, žito.
 private enum ResourceStripMode {
-    case resources  // drvo, kamen, željezo
+    case resources  // zlato, drvo, kamen, željezo
     case food       // kruh, hmelj, žito
 }
 
@@ -233,6 +244,21 @@ struct ContentView: View {
                 gameHUD
                 Spacer()
             }
+
+            // Mali prozor sa strane: ispis zooma (2×, 14×, …) – izvan sive trake
+            HStack {
+                Spacer()
+                Text("\(Int(round(gameState.mapCameraSettings.currentZoom)))×")
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 6))
+                    .padding(.trailing, 24)
+                    .padding(.top, 72)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .allowsHitTesting(false)
         }
         .overlay {
             if showMinijatureWall {
@@ -243,6 +269,16 @@ struct ContentView: View {
             if !gameState.isLevelReady {
                 levelLoadingOverlay
             }
+        }
+        .onChange(of: gameState.isLevelReady) { ready in
+            if ready {
+                AudioManager.shared.playMapMusicIfAvailable(volume: gameState.audioMusicVolume)
+            } else {
+                AudioManager.shared.stopMapMusic()
+            }
+        }
+        .onChange(of: gameState.audioMusicVolume) { vol in
+            AudioManager.shared.updateMapMusicVolume(volume: vol)
         }
         .onAppear { printIconDiagnostics() }
     }
@@ -344,7 +380,7 @@ struct ContentView: View {
             HStack {
                 Spacer(minLength: 0)
                 HStack(spacing: 16) {
-                    // Kompas (lijevo od zooma) – rotacija 90°
+                    // Kompas (rotacija 90°)
                     CompassCubeView(
                         mapRotation: Binding(
                             get: { gameState.mapCameraSettings.mapRotation },
@@ -364,7 +400,7 @@ struct ContentView: View {
                         )
                     )
 
-                    // Zoom – 4 faze (šuma, 3 stabla, 1 stablo, list)
+                    // Zoom – 3 faze (šuma 2×, 3 stabla 8×, 1 stablo 14×)
                     ZoomPhaseView(mapCameraSettings: Binding(
                         get: { gameState.mapCameraSettings },
                         set: { gameState.mapCameraSettings = $0 }
@@ -399,9 +435,10 @@ struct ContentView: View {
 
                     hudDivider
 
-                    // Resursi: Resources botun = drvo, kamen, željezo; Food botun = kruh, hmelj, žito
+                    // Resursi: novci (zlato), drvo, kamen, željezo; Food = kruh, hmelj, žito. Fiksna širina da se sivi element ne mijenja.
                     HStack(spacing: 12) {
                         if resourceStripMode == .resources {
+                            ResourceRow(iconName: "gold", value: gameState.gold, iconSize: 52, systemFallback: "dollarsign.circle.fill")
                             ResourceRow(iconName: "wood", value: gameState.wood)
                             ResourceRow(iconName: "stone", value: gameState.stone, iconSize: 52)
                             ResourceRow(iconName: "iron", value: gameState.iron, iconSize: 52)
@@ -411,6 +448,7 @@ struct ContentView: View {
                             ResourceRow(iconName: "hay", value: gameState.hay)
                         }
                     }
+                    .frame(width: 520)
                     .id(resourceStripMode)
                     .transition(.asymmetric(
                         insertion: .opacity.animation(.easeOut(duration: 0.22)).combined(with: .scale(scale: 0.92)),
@@ -420,7 +458,7 @@ struct ContentView: View {
                 }
                 .padding(.horizontal, 6)
                 .padding(.vertical, 0)
-                .frame(width: 1100, height: 52)
+                .frame(minWidth: 1380, maxWidth: 1380, minHeight: 52, maxHeight: 52)
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
                 .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 1)
                 Spacer(minLength: 0)

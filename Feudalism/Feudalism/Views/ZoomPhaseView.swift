@@ -2,7 +2,7 @@
 //  ZoomPhaseView.swift
 //  Feudalism
 //
-//  Zoom u 4 faze: 1 stablo, 2 stabla, 3 stabla, šuma. Zelene ikone, crna pozadina. Klik = ping-pong (2→3→4→3→2→1→2→…).
+//  Zoom u 3 faze: max zoom out 3 šume (2×), tri stabla (8×), jedno stablo (14×). Sužen element.
 //
 
 import SwiftUI
@@ -24,7 +24,7 @@ private func loadForestIcon() -> NSImage? {
     return nil
 }
 
-/// Ikona: 1 = šuma (2.1), 2 = tri stabla (14), 3 = jedno stablo (29), 4 = list (38).
+/// Ikona: 1 = 3 šume (2× max zoom out), 2 = tri stabla (8×), 3 = jedno stablo (14×).
 private struct ZoomPhaseIcon: View {
     let phase: Int
     private static let forestImage = loadForestIcon()
@@ -33,59 +33,54 @@ private struct ZoomPhaseIcon: View {
         Group {
             switch phase {
             case 1:
-                // Šuma (2.1) – forest ikone jedna do druge, ne diraju se
+                // Max zoom out (2×) – 3 šume jedna do druge
                 if let img = Self.forestImage {
-                    HStack(spacing: 4) {
-                        ForEach(0..<5, id: \.self) { _ in
+                    HStack(spacing: 2) {
+                        ForEach(0..<3, id: \.self) { _ in
                             Image(nsImage: img)
                                 .resizable()
                                 .scaledToFit()
-                                .frame(height: 24)
+                                .frame(height: 20)
                                 .foregroundStyle(greenIcon)
                         }
                     }
                 } else {
-                    HStack(spacing: 6) {
-                        Image(systemName: "tree.fill").foregroundStyle(greenIcon)
-                        Image(systemName: "tree.fill").foregroundStyle(pineGreen)
+                    HStack(spacing: 4) {
                         Image(systemName: "tree.fill").foregroundStyle(greenIcon)
                         Image(systemName: "tree.fill").foregroundStyle(pineGreen)
                         Image(systemName: "tree.fill").foregroundStyle(greenIcon)
                     }
-                    .font(.system(size: 12))
+                    .font(.system(size: 10))
                 }
             case 2:
-                // Zoom 14 – tri stabla jedna do druge
-                HStack(spacing: 6) {
+                // Srednji zoom (8×) – tri stabla
+                HStack(spacing: 4) {
                     Image(systemName: "tree.fill")
                     Image(systemName: "tree.fill")
                     Image(systemName: "tree.fill")
                 }
-            case 3:
-                // Zoom 29 – jedno stablo
-                Image(systemName: "tree.fill")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .font(.system(size: 12))
             default:
-                // Zoom 38 – list
-                Image(systemName: "leaf.fill")
+                // Max zoom (14×) – jedno stablo
+                Image(systemName: "tree.fill")
+                    .font(.system(size: 14))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .font(.system(size: phase == 1 ? 12 : 14))
         .foregroundStyle(greenIcon)
     }
 }
 
-/// Gumb zooma: prikazuje trenutnu fazu (1 stablo / 2 / 3 / šuma). Klik = sljedeća faza (ping-pong).
+/// Gumb zooma: prikazuje trenutnu fazu (3 šume / 3 stabla / 1 stablo). Klik = sljedeća faza. Sužen element.
 struct ZoomPhaseView: View {
     @Binding var mapCameraSettings: MapCameraSettings
 
-    private let viewWidth: CGFloat = 160
+    private let viewWidth: CGFloat = 92
     private let height: CGFloat = 24
-    private let cornerRadius: CGFloat = 6
+    private let cornerRadius: CGFloat = 10
 
     private var currentPhase: Int {
-        min(4, max(1, mapCameraSettings.zoomPhase))
+        min(3, max(1, mapCameraSettings.zoomPhase))
     }
 
     var body: some View {
@@ -114,5 +109,5 @@ struct ZoomPhaseView: View {
 
 #Preview {
     ZoomPhaseView(mapCameraSettings: .constant(MapCameraSettings()))
-        .frame(width: 160, height: 24)
+        .frame(width: 92, height: 24)
 }

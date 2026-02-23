@@ -93,6 +93,12 @@ private final class SceneKitMapNSView: NSView {
     var useTrackpad: Bool = true
     private var magnifyMonitor: Any?
     private var rotateMonitor: Any?
+    /// Jedna gesta pinch = jedan korak zooma; akumuliramo dok traje gesta, na .ended šaljemo jedan korak.
+    private var magnifyAccumulator: CGFloat = 0
+    private static let magnifyThreshold: CGFloat = 0.02
+    /// Jedna gesta rotacije = jedna strana svijeta (kao klik na kompas); akumuliramo kut, na .ended šaljemo ±90°.
+    private var rotateAccumulator: CGFloat = 0
+    private static let rotateThreshold: CGFloat = 0.15
 
     override func layout() {
         super.layout()
@@ -123,6 +129,20 @@ private final class SceneKitMapNSView: NSView {
         onMouseMove?(loc)
     }
 
+    override func rotate(with event: NSEvent) {
+        let phase = event.phase
+        if phase.contains(.began) { rotateAccumulator = 0 }
+        if phase.contains(.changed) { rotateAccumulator += CGFloat(event.rotation) * .pi / 180 }
+        if phase.contains(.ended) || phase.contains(.cancelled) {
+            if rotateAccumulator > Self.rotateThreshold {
+                onRotationDelta?(.pi / 2)
+            } else if rotateAccumulator < -Self.rotateThreshold {
+                onRotationDelta?(-.pi / 2)
+            }
+            rotateAccumulator = 0
+        }
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil {
@@ -141,16 +161,21 @@ private final class SceneKitMapNSView: NSView {
         guard useTrackpad, window != nil, magnifyMonitor == nil else { return }
         magnifyMonitor = NSEvent.addLocalMonitorForEvents(matching: .magnify) { [weak self] event in
             guard let self = self, self.window?.isKeyWindow == true else { return event }
-            let mag = event.magnification
-            if mag != 0 { self.onZoomDelta?(mag > 0 ? 0.12 : -0.12) }
+            let phase = event.phase
+            if phase.contains(.began) { self.magnifyAccumulator = 0 }
+            if phase.contains(.changed) { self.magnifyAccumulator += event.magnification }
+            if phase.contains(.ended) || phase.contains(.cancelled) {
+                if self.magnifyAccumulator > Self.magnifyThreshold {
+                    self.onZoomDelta?(1)
+                } else if self.magnifyAccumulator < -Self.magnifyThreshold {
+                    self.onZoomDelta?(-1)
+                }
+                self.magnifyAccumulator = 0
+            }
             return nil
         }
-        rotateMonitor = NSEvent.addLocalMonitorForEvents(matching: .rotate) { [weak self] event in
-            guard let self = self, self.window?.isKeyWindow == true else { return event }
-            let deg = event.rotation
-            if deg != 0 { self.onRotationDelta?(CGFloat(deg) * .pi / 180) }
-            return nil
-        }
+        // Rotaciju ne hvatimo monitorom (može blokirati isporuku); view prima rotate(with:) iz responder lanca.
+        rotateMonitor = nil
     }
 
     func removeTrackpadMonitors() {
@@ -551,6 +576,9 @@ struct SceneKitMapView: NSViewRepresentable {
         }
 
         scnView.scene = scene
+        coord.gameState = gameState
+        coord.animatedZoom = CGFloat(gameState.mapCameraSettings.currentZoom)
+        scnView.delegate = coord
         applyCamera(cameraNode: cameraNode, targetNode: cameraTarget, settings: gameState.mapCameraSettings)
         gridNode.isHidden = !showGrid
         refreshPlacements(placementsNode, placements: gameState.gameMap.placements, wallTemplate: coord.wallPlacementTemplate)
@@ -643,9 +671,20 @@ struct SceneKitMapView: NSViewRepresentable {
         let coord = context.coordinator
         // Mapa (rootNode, teren, grid, placements) se NIKAD ne dira – samo kamera i target.
 
+        // Odmah primijeni kameru (pan, rotacija) kad se stanje promijeni iz UI (npr. klik na kompas); zoom ostaje glatko u delegateu.
         if let cam = coord.cameraNode, let target = coord.cameraTarget {
-            applyCamera(cameraNode: cam, targetNode: target, settings: gameState.mapCameraSettings)
+            let s = gameState.mapCameraSettings
+            let h = Self.cameraBaseHeight / coord.animatedZoom
+            let r = CGFloat(-s.mapRotation)
+            target.position = SCNVector3(s.panOffset.x, 0, s.panOffset.y)
+            cam.position = SCNVector3(
+                s.panOffset.x + sin(r) * h,
+                h,
+                s.panOffset.y + cos(r) * h
+            )
         }
+
+        // Pivot, ghost, grid
         if let pivot = coord.pivotIndicatorNode {
             pivot.position = coord.cameraTarget?.position ?? SCNVector3(
                 gameState.mapCameraSettings.panOffset.x,
@@ -760,7 +799,10 @@ struct SceneKitMapView: NSViewRepresentable {
         Coordinator()
     }
 
-    class Coordinator {
+    private static let zoomLerpFactor: CGFloat = 0.18
+    private static let cameraBaseHeight: CGFloat = 2800
+
+    class Coordinator: NSObject, SCNSceneRendererDelegate {
         var scene: SCNScene?
         var placementsNode: SCNNode?
         var cameraNode: SCNNode?
@@ -770,6 +812,35 @@ struct SceneKitMapView: NSViewRepresentable {
         var ghostPlacementNode: SCNNode?
         var wallPlacementTemplate: SCNNode?
         var lastGridZoom: CGFloat = 1
+        weak var gameState: GameState?
+        /// Glatka animacija: interpolira se prema target zoomu (iz gameState).
+        var animatedZoom: CGFloat = 8
+
+        func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
+            guard let cam = cameraNode, let target = cameraTarget else { return }
+            let targetZoom: CGFloat
+            let pan: CGPoint
+            let rot: CGFloat
+            if let gs = gameState {
+                targetZoom = gs.mapCameraSettings.currentZoom
+                pan = gs.mapCameraSettings.panOffset
+                rot = gs.mapCameraSettings.mapRotation
+            } else {
+                targetZoom = animatedZoom
+                pan = .zero
+                rot = .pi
+            }
+            animatedZoom += (targetZoom - animatedZoom) * SceneKitMapView.zoomLerpFactor
+            let h = SceneKitMapView.cameraBaseHeight / animatedZoom
+            let orbitRadius = h
+            let r = CGFloat(-rot)
+            target.position = SCNVector3(pan.x, 0, pan.y)
+            cam.position = SCNVector3(
+                pan.x + sin(r) * orbitRadius,
+                h,
+                pan.y + cos(r) * orbitRadius
+            )
+        }
     }
 
     /// Ghost 3D zid koji prati kursor – samo .obj zid, bez kocke; skaliran točno na ćeliju 1×1, poluproziran.
