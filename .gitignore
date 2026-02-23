@@ -41,3 +41,17 @@ Carthage/Build/
 
 # Veliki 3D modeli (preko GitHub limita 100 MB) – drži lokalno, build kopira iz Core/Objects/
 Feudalism/Feudalism/Core/Objects/Market/Meshy_AI_market_0223090758_texture.obj
+# Svi veliki .obj i texture objekti (preko 100 MB) – ne pushati na GitHub
+Feudalism/Feudalism/Core/Objects/Castle/Armory/Armory_Obj.obj
+Feudalism/Feudalism/Core/Objects/Castle/Market/Market.obj
+Feudalism/Feudalism/Core/Objects/Farm/Chicken/Chicken_Obj.obj
+Feudalism/Feudalism/Core/Objects/Farm/Corn/Corn_Obj.obj
+Feudalism/Feudalism/Core/Objects/Food/Bakery/Bakery_Obj.obj
+Feudalism/Feudalism/Core/Objects/Food/Granary/Granary_Obj.obj
+Feudalism/Feudalism/Core/Objects/Food/Windmill/Windmill.obj
+Feudalism/Feudalism/Core/Objects/House/Hotel/Hotel_Obj.obj
+Feudalism/Feudalism/Core/Objects/House/Whel/Whel_Obj.obj
+Feudalism/Feudalism/Core/Objects/Industry/Iron/Iron_Obj.obj
+Feudalism/Feudalism/Core/Objects/Industry/Stone/Stone_Obj.obj
+Feudalism/Feudalism/Core/Objects/Weapons/Arrow/Meshy_AI_Arrow_0223151115_texture.obj
+Feudalism/Feudalism/Core/Objects/Weapons/Shield/Meshy_AI_Shild_0223150723_texture.obj
