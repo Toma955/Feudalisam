@@ -427,8 +427,8 @@ struct ContentView: View {
                     onSelectCowFarm: { /* objekt – uskoro */ },
                     onSelectSheepFarm: { /* objekt – uskoro */ },
                     onSelectWheatFarm: { /* objekt – uskoro */ },
-                    onSelectCornFarm: { /* objekt – uskoro */ },
-                    onSelectChickenFarm: { /* objekt – uskoro */ },
+                    onSelectCornFarm: { gameState.selectedPlacementObjectId = Corn.objectId },
+                    onSelectChickenFarm: { gameState.selectedPlacementObjectId = Chicken.objectId },
                     onSelectVegetablesFarm: { /* objekt – uskoro */ },
                     onSelectGrapesFarm: { /* objekt – uskoro */ },
                     onSelectSpicesFarm: { /* objekt – uskoro */ },
@@ -446,8 +446,8 @@ struct ContentView: View {
                 MineButtonExpandedView(
                     onSelectLager: { /* industrija – uskoro */ },
                     onSelectStump: { /* industrija – uskoro */ },
-                    onSelectIronMine: { /* industrija – uskoro */ },
-                    onSelectStoneMine: { /* industrija – uskoro */ },
+                    onSelectIronMine: { gameState.selectedPlacementObjectId = Iron.objectId },
+                    onSelectStoneMine: { gameState.selectedPlacementObjectId = Stone.objectId },
                     onSelectCarriage: { /* industrija – uskoro */ }
                 )
             case .tools:
@@ -464,20 +464,20 @@ struct ContentView: View {
                     onSelectHouse: { /* kuća – uskoro */ },
                     onSelectPharmacy: { /* kuća – uskoro */ },
                     onSelectGreenHouse: { /* kuća – uskoro */ },
-                    onSelectHotel: { /* kuća – uskoro */ },
-                    onSelectWaterWell: { /* kuća – uskoro */ },
+                    onSelectHotel: { gameState.selectedPlacementObjectId = Hotel.objectId },
+                    onSelectWaterWell: { gameState.selectedPlacementObjectId = Well.objectId },
                     onSelectChurch: { /* kuća – uskoro */ },
                     onSelectDiplomacy: { /* kuća – uskoro */ }
                 )
             case .food:
                 FoodButtonExpandedView(
-                    onSelectMill: { /* hrana – uskoro */ },
+                    onSelectMill: { gameState.selectedPlacementObjectId = Windmill.objectId },
                     onSelectBrewery: { /* hrana – uskoro */ },
                     onSelectDistillery: { /* hrana – uskoro */ },
                     onSelectWineCellar: { /* hrana – uskoro */ },
                     onSelectTavern: { /* hrana – uskoro */ },
-                    onSelectPantry: { /* hrana – uskoro */ },
-                    onSelectBakery: { /* hrana – uskoro */ },
+                    onSelectPantry: { gameState.selectedPlacementObjectId = Granary.objectId },
+                    onSelectBakery: { gameState.selectedPlacementObjectId = Bakery.objectId },
                     onSelectCanteen: { /* hrana – uskoro */ }
                 )
             case .cave:

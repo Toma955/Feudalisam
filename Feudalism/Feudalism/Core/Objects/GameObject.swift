@@ -59,11 +59,18 @@ extension ObjectCategory {
             ]
         case .hrana:
             return [
+                Food.gameObject,
+                Windmill.gameObject,
+                Bakery.gameObject,
+                Granary.gameObject,
                 GameObject(name: "Pšenica", category: .hrana),
                 GameObject(name: "Povrće", category: .hrana)
             ]
         case .farme:
             return [
+                Farm.gameObject,
+                Chicken.gameObject,
+                Corn.gameObject,
                 GameObject(name: "Farma", category: .farme, width: 4, height: 4),
                 GameObject(name: "Polje", category: .farme, width: 2, height: 2)
             ]
@@ -79,7 +86,10 @@ extension ObjectCategory {
             ]
         case .dvorac:
             return [
-                GameObject(name: "Dvorac", category: .dvorac, width: 8, height: 8),
+                Castle.gameObject,
+                House.gameObject,
+                Well.gameObject,
+                Hotel.gameObject,
                 GameObject(name: "Kula", category: .dvorac, width: 3, height: 3),
                 GameObject(name: "Kuća", category: .dvorac, width: 4, height: 4), // basic 4×4
                 Market.gameObject
@@ -94,6 +104,12 @@ extension ObjectCategory {
             return [
                 GameObject(name: "Seljak", category: .radnici),
                 GameObject(name: "Obrtnik", category: .radnici)
+            ]
+        case .industrija:
+            return [
+                Industry.gameObject,
+                Iron.gameObject,
+                Stone.gameObject
             ]
         case .ostali:
             return [

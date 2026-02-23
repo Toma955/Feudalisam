@@ -104,6 +104,15 @@
 				F0DDE33F2F49808C00D1017C /* Resources */,
 				F0DDE37A2F49808C00D1017C /* Copy Wall model + texture */,
 				F0DDE37B2F49808C00D1017C /* Copy Market model + texture */,
+				F0DDE37C2F49808C00D1017C /* Copy Windmill model + texture */,
+				F0DDE37F2F49808C00D1017C /* Copy Bakery model + texture */,
+				F0DDE3802F49808C00D1017C /* Copy Granary model + texture */,
+				F0DDE3812F49808C00D1017C /* Copy Whel model + texture */,
+				F0DDE3822F49808C00D1017C /* Copy Hotel model + texture */,
+				F0DDE37D2F49808C00D1017C /* Copy Chicken model + texture */,
+				F0DDE37E2F49808C00D1017C /* Copy Corn model + texture */,
+				F0DDE3832F49808C00D1017C /* Copy Iron model + texture */,
+				F0DDE3842F49808C00D1017C /* Copy Stone model + texture */,
 			);
 			buildRules = (
 			);
@@ -240,16 +249,16 @@
 			files = (
 			);
 			inputPaths = (
-				"$(SRCROOT)/Feudalism/Core/Objects/Wall/Meshy_AI_Stone_Wall_0221071847_texture.obj",
-				"$(SRCROOT)/Feudalism/Core/Objects/Wall/Meshy_AI_Stone_Wall_0221071847_texture.mtl",
-				"$(SRCROOT)/Feudalism/Core/Objects/Wall/Wall_texture.png",
+				"$(SRCROOT)/Feudalism/Core/Objects/Castle/Wall/Wall.obj",
+				"$(SRCROOT)/Feudalism/Core/Objects/Castle/Wall/Wall.mtl",
+				"$(SRCROOT)/Feudalism/Core/Objects/Castle/Wall/Wall_texture.png",
 			);
 			name = "Copy Wall model + texture";
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\nRES=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources\"\nWALL=\"$RES/Core/Objects/Wall\"\nmkdir -p \"$WALL\"\nSRC=\"${SRCROOT}/Feudalism/Core/Objects/Wall\"\ncp \"$SRC/\"*.obj \"$WALL/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$WALL/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$WALL/\" 2>/dev/null || true\nmkdir -p \"$RES/Wall\"\ncp \"$SRC/\"*.obj \"$RES/Wall/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$RES/Wall/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$RES/Wall/\" 2>/dev/null || true\n";
+			shellScript = "set -e\nRES=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources\"\nWALL=\"$RES/Core/Objects/Castle/Wall\"\nmkdir -p \"$WALL\"\nSRC=\"${SRCROOT}/Feudalism/Core/Objects/Castle/Wall\"\ncp \"$SRC/\"*.obj \"$WALL/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$WALL/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$WALL/\" 2>/dev/null || true\nmkdir -p \"$RES/Wall\"\ncp \"$SRC/\"*.obj \"$RES/Wall/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$RES/Wall/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$RES/Wall/\" 2>/dev/null || true\n";
 		};
 		F0DDE37B2F49808C00D1017C /* Copy Market model + texture */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -257,16 +266,169 @@
 			files = (
 			);
 			inputPaths = (
-				"$(SRCROOT)/Feudalism/Core/Objects/Market/Meshy_AI_market_0223090758_texture.obj",
-				"$(SRCROOT)/Feudalism/Core/Objects/Market/Meshy_AI_market_0223090758_texture.mtl",
-				"$(SRCROOT)/Feudalism/Core/Objects/Market/Meshy_AI_market_0223090758_texture.png",
+				"$(SRCROOT)/Feudalism/Core/Objects/Castle/Market/Market.obj",
+				"$(SRCROOT)/Feudalism/Core/Objects/Castle/Market/Market.mtl",
+				"$(SRCROOT)/Feudalism/Core/Objects/Castle/Market/Market_texture.png",
 			);
 			name = "Copy Market model + texture";
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\nRES=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources\"\nMARKET=\"$RES/Core/Objects/Market\"\nmkdir -p \"$MARKET\"\nSRC=\"${SRCROOT}/Feudalism/Core/Objects/Market\"\ncp \"$SRC/\"*.obj \"$MARKET/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$MARKET/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$MARKET/\" 2>/dev/null || true\nmkdir -p \"$RES/Market\"\ncp \"$SRC/\"*.obj \"$RES/Market/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$RES/Market/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$RES/Market/\" 2>/dev/null || true\n";
+			shellScript = "set -e\nRES=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources\"\nMARKET=\"$RES/Core/Objects/Castle/Market\"\nmkdir -p \"$MARKET\"\nSRC=\"${SRCROOT}/Feudalism/Core/Objects/Castle/Market\"\ncp \"$SRC/\"*.obj \"$MARKET/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$MARKET/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$MARKET/\" 2>/dev/null || true\nmkdir -p \"$RES/Market\"\ncp \"$SRC/\"*.obj \"$RES/Market/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$RES/Market/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$RES/Market/\" 2>/dev/null || true\n";
+		};
+		F0DDE37C2F49808C00D1017C /* Copy Windmill model + texture */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Feudalism/Core/Objects/Food/Windmill/Windmill.obj",
+				"$(SRCROOT)/Feudalism/Core/Objects/Food/Windmill/Windmill.mtl",
+				"$(SRCROOT)/Feudalism/Core/Objects/Food/Windmill/Windmill_texture.png",
+			);
+			name = "Copy Windmill model + texture";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nRES=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources\"\nWINDMILL=\"$RES/Core/Objects/Food/Windmill\"\nmkdir -p \"$WINDMILL\"\nSRC=\"${SRCROOT}/Feudalism/Core/Objects/Food/Windmill\"\ncp \"$SRC/\"*.obj \"$WINDMILL/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$WINDMILL/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$WINDMILL/\" 2>/dev/null || true\nmkdir -p \"$RES/Windmill\"\ncp \"$SRC/\"*.obj \"$RES/Windmill/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$RES/Windmill/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$RES/Windmill/\" 2>/dev/null || true\n";
+		};
+		F0DDE37D2F49808C00D1017C /* Copy Chicken model + texture */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Feudalism/Core/Objects/Farm/Chicken/Chicken_Obj.obj",
+				"$(SRCROOT)/Feudalism/Core/Objects/Farm/Chicken/Chicken_Mtl.mtl",
+				"$(SRCROOT)/Feudalism/Core/Objects/Farm/Chicken/Chicken_Png.png",
+			);
+			name = "Copy Chicken model + texture";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nRES=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources\"\nCHICKEN=\"$RES/Core/Objects/Farm/Chicken\"\nmkdir -p \"$CHICKEN\"\nSRC=\"${SRCROOT}/Feudalism/Core/Objects/Farm/Chicken\"\ncp \"$SRC/\"*.obj \"$CHICKEN/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$CHICKEN/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$CHICKEN/\" 2>/dev/null || true\nmkdir -p \"$RES/Chicken\"\ncp \"$SRC/\"*.obj \"$RES/Chicken/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$RES/Chicken/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$RES/Chicken/\" 2>/dev/null || true\n";
+		};
+		F0DDE37E2F49808C00D1017C /* Copy Corn model + texture */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Feudalism/Core/Objects/Farm/Corn/Corn_Obj.obj",
+				"$(SRCROOT)/Feudalism/Core/Objects/Farm/Corn/Corn_Mtl.mtl",
+				"$(SRCROOT)/Feudalism/Core/Objects/Farm/Corn/Corn_Png.png",
+			);
+			name = "Copy Corn model + texture";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nRES=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources\"\nCORN=\"$RES/Core/Objects/Farm/Corn\"\nmkdir -p \"$CORN\"\nSRC=\"${SRCROOT}/Feudalism/Core/Objects/Farm/Corn\"\ncp \"$SRC/\"*.obj \"$CORN/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$CORN/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$CORN/\" 2>/dev/null || true\nmkdir -p \"$RES/Corn\"\ncp \"$SRC/\"*.obj \"$RES/Corn/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$RES/Corn/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$RES/Corn/\" 2>/dev/null || true\n";
+		};
+		F0DDE37F2F49808C00D1017C /* Copy Bakery model + texture */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Feudalism/Core/Objects/Food/Bakery/Bakery_Obj.obj",
+				"$(SRCROOT)/Feudalism/Core/Objects/Food/Bakery/Bakery_Mtl.mtl",
+				"$(SRCROOT)/Feudalism/Core/Objects/Food/Bakery/Bakery_Png.png",
+			);
+			name = "Copy Bakery model + texture";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nRES=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources\"\nBAKERY=\"$RES/Core/Objects/Food/Bakery\"\nmkdir -p \"$BAKERY\"\nSRC=\"${SRCROOT}/Feudalism/Core/Objects/Food/Bakery\"\ncp \"$SRC/\"*.obj \"$BAKERY/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$BAKERY/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$BAKERY/\" 2>/dev/null || true\nmkdir -p \"$RES/Bakery\"\ncp \"$SRC/\"*.obj \"$RES/Bakery/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$RES/Bakery/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$RES/Bakery/\" 2>/dev/null || true\n";
+		};
+		F0DDE3802F49808C00D1017C /* Copy Granary model + texture */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Feudalism/Core/Objects/Food/Granary/Granary_Obj.obj",
+				"$(SRCROOT)/Feudalism/Core/Objects/Food/Granary/Granary_Mtl.mtl",
+				"$(SRCROOT)/Feudalism/Core/Objects/Food/Granary/Granary_Png.png",
+			);
+			name = "Copy Granary model + texture";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nRES=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources\"\nGRANARY=\"$RES/Core/Objects/Food/Granary\"\nmkdir -p \"$GRANARY\"\nSRC=\"${SRCROOT}/Feudalism/Core/Objects/Food/Granary\"\ncp \"$SRC/\"*.obj \"$GRANARY/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$GRANARY/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$GRANARY/\" 2>/dev/null || true\nmkdir -p \"$RES/Granary\"\ncp \"$SRC/\"*.obj \"$RES/Granary/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$RES/Granary/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$RES/Granary/\" 2>/dev/null || true\n";
+		};
+		F0DDE3812F49808C00D1017C /* Copy Whel model + texture */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Feudalism/Core/Objects/House/Whel/Whel_Obj.obj",
+				"$(SRCROOT)/Feudalism/Core/Objects/House/Whel/Whel_Mtl.mtl",
+				"$(SRCROOT)/Feudalism/Core/Objects/House/Whel/Whel_Png.png",
+			);
+			name = "Copy Whel model + texture";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nRES=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources\"\nWHEL=\"$RES/Core/Objects/House/Whel\"\nmkdir -p \"$WHEL\"\nSRC=\"${SRCROOT}/Feudalism/Core/Objects/House/Whel\"\ncp \"$SRC/\"*.obj \"$WHEL/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$WHEL/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$WHEL/\" 2>/dev/null || true\nmkdir -p \"$RES/Whel\"\ncp \"$SRC/\"*.obj \"$RES/Whel/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$RES/Whel/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$RES/Whel/\" 2>/dev/null || true\n";
+		};
+		F0DDE3822F49808C00D1017C /* Copy Hotel model + texture */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Feudalism/Core/Objects/House/Hotel/Hotel_Obj.obj",
+				"$(SRCROOT)/Feudalism/Core/Objects/House/Hotel/Hotel_Mdl.mtl",
+				"$(SRCROOT)/Feudalism/Core/Objects/House/Hotel/Hotel_Png.png",
+			);
+			name = "Copy Hotel model + texture";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nRES=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources\"\nHOTEL=\"$RES/Core/Objects/House/Hotel\"\nmkdir -p \"$HOTEL\"\nSRC=\"${SRCROOT}/Feudalism/Core/Objects/House/Hotel\"\ncp \"$SRC/\"*.obj \"$HOTEL/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$HOTEL/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$HOTEL/\" 2>/dev/null || true\nmkdir -p \"$RES/Hotel\"\ncp \"$SRC/\"*.obj \"$RES/Hotel/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$RES/Hotel/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$RES/Hotel/\" 2>/dev/null || true\n";
+		};
+		F0DDE3832F49808C00D1017C /* Copy Iron model + texture */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Feudalism/Core/Objects/Industry/Iron/Iron_Obj.obj",
+				"$(SRCROOT)/Feudalism/Core/Objects/Industry/Iron/Iron_Mtl.mtl",
+				"$(SRCROOT)/Feudalism/Core/Objects/Industry/Iron/Iron_Png.png",
+			);
+			name = "Copy Iron model + texture";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nRES=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources\"\nIRON=\"$RES/Core/Objects/Industry/Iron\"\nmkdir -p \"$IRON\"\nSRC=\"${SRCROOT}/Feudalism/Core/Objects/Industry/Iron\"\ncp \"$SRC/\"*.obj \"$IRON/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$IRON/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$IRON/\" 2>/dev/null || true\nmkdir -p \"$RES/Iron\"\ncp \"$SRC/\"*.obj \"$RES/Iron/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$RES/Iron/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$RES/Iron/\" 2>/dev/null || true\n";
+		};
+		F0DDE3842F49808C00D1017C /* Copy Stone model + texture */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Feudalism/Core/Objects/Industry/Stone/Stone_Obj.obj",
+				"$(SRCROOT)/Feudalism/Core/Objects/Industry/Stone/Stone_Mtl.mtl",
+				"$(SRCROOT)/Feudalism/Core/Objects/Industry/Stone/Stone_Png.png",
+			);
+			name = "Copy Stone model + texture";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nRES=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources\"\nSTONE=\"$RES/Core/Objects/Industry/Stone\"\nmkdir -p \"$STONE\"\nSRC=\"${SRCROOT}/Feudalism/Core/Objects/Industry/Stone\"\ncp \"$SRC/\"*.obj \"$STONE/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$STONE/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$STONE/\" 2>/dev/null || true\nmkdir -p \"$RES/Stone\"\ncp \"$SRC/\"*.obj \"$RES/Stone/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$RES/Stone/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$RES/Stone/\" 2>/dev/null || true\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

@@ -21,13 +21,14 @@
 ## Jezgra (Core)
 - **Core/GameState.swift** – globalno stanje (mapCameraSettings, isMapEditorMode, gameMap, …)
 - **Core/Map/** – GameMap, Placement, MapCoordinate, MapCell, MapSizePreset, SpatialSize
-- **Core/Objects/** – GameObject, ObjectCatalog, ObjectCategory; Wall (zid + .obj/.mtl)
+- **Core/Objects/** – GameObject, ObjectCatalog, ObjectCategory; Castle (Castle.swift, Wall/, Market/ s .obj/.mtl)
 - **Core/AI/** – AILordProfile, AILordProfileStore, ComputerLordAI, GameSituationSnapshot
 - **Core/Realms/** – Realm, RealmGroup
 
 ## Resursi
 - **Assets.xcassets** – ikone (castle, sword, farm, food), AppIcon, AccentColor
-- **Core/Objects/Wall/Wall/** – .obj i .mtl model zida
+- **Core/Objects/Castle/Wall/** – Wall.obj, Wall.mtl, Wall_texture.png (model zida)
+- **Core/Objects/Castle/Market/** – Market.obj, Market.mtl, Market_texture.png (model tržnice)
 
 ## Uklonjeno (nepotrebno)
 - ~~ViewController.swift~~ – stari AppKit controller, učitavao GameScene.sks; aplikacija koristi SwiftUI + GameView/GameScene u kodu
