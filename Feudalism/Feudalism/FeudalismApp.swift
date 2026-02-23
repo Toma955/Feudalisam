@@ -11,6 +11,7 @@ import SwiftUI
 struct FeudalismApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var gameState = GameState()
+    @StateObject private var assetLoader = GameAssetLoader.shared
     /// Kad je true i showStartupAnimation uključen, prikaže se IntroView (crni ekran + animacija) prije glavnog izbornika.
     @State private var showIntroScreen = true
 
@@ -32,6 +33,7 @@ struct FeudalismApp: App {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.black)
             .environmentObject(gameState)
+            .environmentObject(assetLoader)
             .onChange(of: gameState.isShowingMainMenu) { if $0 { AudioManager.shared.stopMapMusic() } }
             .onChange(of: gameState.isMapEditorMode) { if $0 { AudioManager.shared.stopMapMusic() } }
         }

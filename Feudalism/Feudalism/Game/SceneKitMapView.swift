@@ -61,6 +61,62 @@ private func makeTerrainTexture() -> Any? {
     return skTex
 }
 
+/// Orijentacija terena: ravnina u XZ (width = X, height = Z), usklađeno s mrežom za crtanje objekata.
+private let terrainPlaneRotationX: CGFloat = -.pi / 2
+
+/// Proceduralni teren (ravnina + tekstura) – koristi se kad nema učitane .scn mape ili kad .scn nema node "terrain".
+/// Ako je `terrainTexture` predan (npr. iz GameAssetLoader cachea), koristi ga umjesto generiranja.
+/// Nikad ne ostavlja bijelu boju: ako tekstura nije dostupna, koristi terrainFallbackColor.
+private func makeProceduralTerrainNode(terrainTexture: Any? = nil) -> SCNNode {
+    let plane = SCNPlane(width: mapWorldW, height: mapWorldH)
+    let terrainMat = SCNMaterial()
+    let tex = terrainTexture ?? makeTerrainTexture()
+    terrainMat.diffuse.contents = tex ?? terrainFallbackColor
+    terrainMat.ambient.contents = NSColor.black
+    terrainMat.specular.contents = NSColor.black
+    terrainMat.isDoubleSided = true
+    terrainMat.lightingModel = .constant
+    plane.materials = [terrainMat]
+    let planeNode = SCNNode(geometry: plane)
+    planeNode.eulerAngles.x = terrainPlaneRotationX
+    planeNode.position = SCNVector3(0, 0, 0)
+    planeNode.name = "terrain"
+    planeNode.categoryBitMask = 1
+    return planeNode
+}
+
+/// Učitani teren iz .scn ponekad ima krivu orijentaciju ili bijeli materijal – ispravi na XZ ravninu i boju zemlje.
+private func fixLoadedTerrainOrientationAndMaterial(_ root: SCNNode) {
+    guard let terrain = findTerrainInHierarchy(root) else { return }
+    terrain.eulerAngles.x = terrainPlaneRotationX
+    terrain.eulerAngles.y = 0
+    terrain.eulerAngles.z = 0
+    guard let geo = terrain.geometry, let mat = geo.materials.first else { return }
+    mat.ambient.contents = NSColor.black
+    mat.specular.contents = NSColor.black
+    if mat.diffuse.contents == nil || isTerrainMaterialWhiteOrEmpty(mat.diffuse.contents) {
+        mat.diffuse.contents = makeTerrainTexture() ?? terrainFallbackColor
+    }
+}
+
+private func findTerrainInHierarchy(_ node: SCNNode) -> SCNNode? {
+    if node.name == "terrain" { return node }
+    for child in node.childNodes {
+        if let t = findTerrainInHierarchy(child) { return t }
+    }
+    return nil
+}
+
+private func isTerrainMaterialWhiteOrEmpty(_ contents: Any?) -> Bool {
+    guard let c = contents else { return true }
+    if let color = c as? NSColor {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        color.usingColorSpace(.deviceRGB)?.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return r > 0.95 && g > 0.95 && b > 0.95
+    }
+    return false
+}
+
 /// Učita sliku za kursor iz Icons ili bundlea po imenu (bez ekstenzije).
 private func loadCursorImage(named name: String) -> NSImage? {
     if let img = NSImage(named: name) { return img }
@@ -485,14 +541,28 @@ struct SceneKitMapView: NSViewRepresentable {
     var onRemoveAt: ((Int, Int) -> Void)?
     var isPlaceMode: Bool { gameState.selectedPlacementObjectId != nil }
 
-    /// Pred-učitanje resursa igre tijekom početne animacije (teren, zid .obj). Pozovi iz IntroView.onAppear.
-    static func preloadGameAssets() {
-        DispatchQueue.global(qos: .userInitiated).async {
-            _ = makeTerrainTexture()
-            DispatchQueue.main.async {
-                _ = Wall.loadSceneKitNode(from: .main)
-            }
+    /// Vraća proceduralnu teksturu terena za pred-učitavanje (paralelni loader). Može se zvati s background threada.
+    static func createTerrainTextureForPreload() -> Any? {
+        makeTerrainTexture()
+    }
+
+    /// Spremi proceduralnu teksturu terena (pustinjske boje) u PNG na zadani URL. Koristi se pri spremanju SoloLevel.scn da se tekstura uključi u mapu.
+    static func exportTerrainTexture(to url: URL) -> Bool {
+        guard let cg = makeTerrainCGImage() else { return false }
+        let rep = NSBitmapImageRep(cgImage: cg)
+        rep.size = NSSize(width: cg.width, height: cg.height)
+        guard let data = rep.representation(using: .png, properties: [:]) else { return false }
+        do {
+            try data.write(to: url)
+            return true
+        } catch {
+            return false
         }
+    }
+
+    /// Pred-učitanje (legacy) – preferiraj GameAssetLoader.loadAll() koji radi paralelno s progressom.
+    static func preloadGameAssets() {
+        Task { await GameAssetLoader.shared.loadAllIfNeeded() }
     }
 
     func makeNSView(context: Context) -> NSView {
@@ -519,22 +589,46 @@ struct SceneKitMapView: NSViewRepresentable {
         let halfH = mapWorldH / 2
 
         let scene = SCNScene()
-
-        // Mapa: teren, grid, placements – FIKSNI u sceni, NIKAD im ne mijenjamo position/rotation (samo u makeNSView)
         scene.rootNode.position = SCNVector3Zero
         scene.rootNode.eulerAngles = SCNVector3Zero
-        let plane = SCNPlane(width: mapWorldW, height: mapWorldH)
-        let terrainMat = SCNMaterial()
-        terrainMat.diffuse.contents = makeTerrainTexture()
-        terrainMat.isDoubleSided = true
-        terrainMat.lightingModel = .constant
-        plane.materials = [terrainMat]
-        let planeNode = SCNNode(geometry: plane)
-        planeNode.eulerAngles.x = -.pi / 2
-        planeNode.position = SCNVector3(0, 0, 0)
-        planeNode.name = "terrain"
-        planeNode.categoryBitMask = 1
-        scene.rootNode.addChildNode(planeNode)
+
+        // Koristi pred-učitane assete ako je loader završio (IntroView); inače učitaj/generiraj na zahtjev.
+        let loader = GameAssetLoader.shared
+        // Teksturu terena uvijek gradimo na main threadu – SKTexture s pozadinskog threada (cache) u SceneKitu često daje bijelu površinu.
+        let terrainTextureOnMainThread = makeTerrainTexture()
+
+        // Solo mod: učitaj postojeću mapu (bundle ili spremljeni SoloLevel.scn) ili generiraj, spremi i učitaj
+        let rows = gameState.gameMap.rows
+        let cols = gameState.gameMap.cols
+        var level: LoadedLevel?
+        if gameState.isSoloMode {
+            if loader.isLoaded, let cached = loader.cachedLevel() {
+                level = cached
+            } else {
+                level = SceneKitLevelLoader.loadForSoloMode(bundleLevelName: gameState.currentLevelName, bundle: .main)
+                if level == nil {
+                    gameState.levelLoadingMessage = "Generiranje mape (\(rows)×\(cols))…"
+                    gameState.objectWillChange.send()
+                    let proceduralTerrain = makeProceduralTerrainNode(terrainTexture: terrainTextureOnMainThread)
+                    level = SceneKitLevelLoader.generateAndSaveSoloLevel(terrainNode: proceduralTerrain)
+                }
+            }
+        } else {
+            level = gameState.currentLevelName.flatMap { SceneKitLevelLoader.load(name: $0, bundle: .main) }
+        }
+        if let level = level {
+            level.levelRoot.position = SCNVector3Zero
+            level.levelRoot.eulerAngles = SCNVector3Zero
+            fixLoadedTerrainOrientationAndMaterial(level.levelRoot)
+            scene.rootNode.addChildNode(level.levelRoot)
+            if level.terrainNode == nil {
+                let fallbackPlane = makeProceduralTerrainNode(terrainTexture: terrainTextureOnMainThread)
+                scene.rootNode.addChildNode(fallbackPlane)
+            }
+        } else {
+            let planeNode = makeProceduralTerrainNode(terrainTexture: terrainTextureOnMainThread)
+            scene.rootNode.addChildNode(planeNode)
+        }
 
         let gridNode = SCNNode()
         gridNode.name = "grid"
@@ -594,349 +688,19 @@ struct SceneKitMapView: NSViewRepresentable {
         coord.cameraTarget = cameraTarget
         coord.pivotIndicatorNode = pivotIndicator
         coord.gridNode = gridNode
-        // Template za postavljeni zid (1×1) – širina/dubina na ćeliju, visina iz omjera modela.
-        if let placementWallNode = Wall.loadSceneKitNode(from: .main) {
-            let templateContainer = SCNNode()
-            placementWallNode.position = SCNVector3Zero
-            templateContainer.addChildNode(placementWallNode)
-            var (minB, maxB) = templateContainer.boundingBox
-            let dx = max(CGFloat(maxB.x - minB.x), 0.1)
-            let dz = max(CGFloat(maxB.z - minB.z), 0.1)
-            let scaleX = cellSizeW / dx
-            let scaleZ = cellSizeH / dz
-            let scaleY = min(scaleX, scaleZ)
-            placementWallNode.scale = SCNVector3(scaleX, scaleY, scaleZ)
-            coord.wallPlacementTemplate = templateContainer
-            // Ghost = klon templatea da bude ista veličina kao postavljeni zid. Dupliciraj materijale da zelena
-            // ostane samo na ghostu, a postavljeni zidovi (klonovi templatea) ostanu u originalnoj teksturi.
-            let ghostNode = templateContainer.clone()
-            duplicateMaterialsRecursive(ghostNode)
-            ghostNode.name = "ghostPlacement"
-            ghostNode.isHidden = true
-            ghostNode.categoryBitMask = 0
-            ghostNode.childNodes.forEach { $0.categoryBitMask = 0 }
-            applyTransparencyRecursive(0.6, to: ghostNode)
-            scene.rootNode.addChildNode(ghostNode)
-            coord.ghostPlacementNode = ghostNode
-        } else {
-            let ghostNode = makeGhostWallNode()
-            ghostNode.name = "ghostPlacement"
-            ghostNode.isHidden = true
-            ghostNode.categoryBitMask = 0
-            ghostNode.childNodes.forEach { $0.categoryBitMask = 0 }
-            scene.rootNode.addChildNode(ghostNode)
-            coord.ghostPlacementNode = ghostNode
-        }
-        // Template i ghost za Tržnicu (Market) – 3×3 ćelije; zeleni duh pri pomicanju, puni model pri kliku.
-        let marketCellSize = 3
-        if let placementMarketNode = Market.loadSceneKitNode(from: .main) {
-            let templateContainer = SCNNode()
-            placementMarketNode.position = SCNVector3Zero
-            templateContainer.addChildNode(placementMarketNode)
-            var (minB, maxB) = templateContainer.boundingBox
-            let dx = max(CGFloat(maxB.x - minB.x), 0.1)
-            let dz = max(CGFloat(maxB.z - minB.z), 0.1)
-            let scaleX = (CGFloat(marketCellSize) * cellSizeW) / dx
-            let scaleZ = (CGFloat(marketCellSize) * cellSizeH) / dz
-            let scaleY = min(scaleX, scaleZ)
-            placementMarketNode.scale = SCNVector3(scaleX, scaleY, scaleZ)
-            coord.marketPlacementTemplate = templateContainer
-            let ghostNode = templateContainer.clone()
-            duplicateMaterialsRecursive(ghostNode)
-            ghostNode.name = "ghostMarket"
-            ghostNode.isHidden = true
-            ghostNode.categoryBitMask = 0
-            ghostNode.childNodes.forEach { $0.categoryBitMask = 0 }
-            applyTransparencyRecursive(0.6, to: ghostNode)
-            scene.rootNode.addChildNode(ghostNode)
-            coord.ghostMarketNode = ghostNode
-        } else {
-            let ghostNode = makeGhostMarketNode()
-            ghostNode.name = "ghostMarket"
-            ghostNode.isHidden = true
-            ghostNode.categoryBitMask = 0
-            ghostNode.childNodes.forEach { $0.categoryBitMask = 0 }
-            scene.rootNode.addChildNode(ghostNode)
-            coord.ghostMarketNode = ghostNode
-        }
-        // Template i ghost za Mlin (Windmill) – 3×3 ćelije; zeleni duh pri pomicanju.
-        let windmillCellSize = 3
-        if let placementWindmillNode = Windmill.loadSceneKitNode(from: .main) {
-            let templateContainer = SCNNode()
-            placementWindmillNode.position = SCNVector3Zero
-            templateContainer.addChildNode(placementWindmillNode)
-            var (minB, maxB) = templateContainer.boundingBox
-            let dx = max(CGFloat(maxB.x - minB.x), 0.1)
-            let dz = max(CGFloat(maxB.z - minB.z), 0.1)
-            let scaleX = (CGFloat(windmillCellSize) * cellSizeW) / dx
-            let scaleZ = (CGFloat(windmillCellSize) * cellSizeH) / dz
-            let scaleY = min(scaleX, scaleZ)
-            placementWindmillNode.scale = SCNVector3(scaleX, scaleY, scaleZ)
-            coord.windmillPlacementTemplate = templateContainer
-            let ghostNode = templateContainer.clone()
-            duplicateMaterialsRecursive(ghostNode)
-            ghostNode.name = "ghostWindmill"
-            ghostNode.isHidden = true
-            ghostNode.categoryBitMask = 0
-            ghostNode.childNodes.forEach { $0.categoryBitMask = 0 }
-            applyTransparencyRecursive(0.6, to: ghostNode)
-            scene.rootNode.addChildNode(ghostNode)
-            coord.ghostWindmillNode = ghostNode
-        } else {
-            let ghostNode = makeGhostWindmillNode()
-            ghostNode.name = "ghostWindmill"
-            ghostNode.isHidden = true
-            ghostNode.categoryBitMask = 0
-            ghostNode.childNodes.forEach { $0.categoryBitMask = 0 }
-            scene.rootNode.addChildNode(ghostNode)
-            coord.ghostWindmillNode = ghostNode
-        }
-        // Template i ghost za Pekaru (Bakery) – 2×2 ćelije.
-        let bakeryCellSize = 2
-        if let bakeryNode = Bakery.loadSceneKitNode(from: .main) {
-            let templateContainer = SCNNode()
-            bakeryNode.position = SCNVector3Zero
-            templateContainer.addChildNode(bakeryNode)
-            var (minB, maxB) = templateContainer.boundingBox
-            let dx = max(CGFloat(maxB.x - minB.x), 0.1)
-            let dz = max(CGFloat(maxB.z - minB.z), 0.1)
-            let scaleX = (CGFloat(bakeryCellSize) * cellSizeW) / dx
-            let scaleZ = (CGFloat(bakeryCellSize) * cellSizeH) / dz
-            let scaleY = min(scaleX, scaleZ)
-            bakeryNode.scale = SCNVector3(scaleX, scaleY, scaleZ)
-            coord.bakeryPlacementTemplate = templateContainer
-            let ghostBakeryNode = templateContainer.clone()
-            duplicateMaterialsRecursive(ghostBakeryNode)
-            ghostBakeryNode.name = "ghostBakery"
-            ghostBakeryNode.isHidden = true
-            ghostBakeryNode.categoryBitMask = 0
-            ghostBakeryNode.childNodes.forEach { $0.categoryBitMask = 0 }
-            applyTransparencyRecursive(0.6, to: ghostBakeryNode)
-            scene.rootNode.addChildNode(ghostBakeryNode)
-            coord.ghostBakeryNode = ghostBakeryNode
-        } else {
-            let ghostBakeryNode = makeGhostBakeryNode()
-            ghostBakeryNode.name = "ghostBakery"
-            ghostBakeryNode.isHidden = true
-            ghostBakeryNode.categoryBitMask = 0
-            ghostBakeryNode.childNodes.forEach { $0.categoryBitMask = 0 }
-            scene.rootNode.addChildNode(ghostBakeryNode)
-            coord.ghostBakeryNode = ghostBakeryNode
-        }
-
-        // Template i ghost za Kokošinjac (Chicken) i Kukuruz (Corn) – 2×2 ćelije.
-        let farmObjCellSize = 2
-        if let chickenNode = Chicken.loadSceneKitNode(from: .main) {
-            let templateContainer = SCNNode()
-            chickenNode.position = SCNVector3Zero
-            templateContainer.addChildNode(chickenNode)
-            var (minB, maxB) = templateContainer.boundingBox
-            let dx = max(CGFloat(maxB.x - minB.x), 0.1)
-            let dz = max(CGFloat(maxB.z - minB.z), 0.1)
-            let scaleX = (CGFloat(farmObjCellSize) * cellSizeW) / dx
-            let scaleZ = (CGFloat(farmObjCellSize) * cellSizeH) / dz
-            let scaleY = min(scaleX, scaleZ)
-            chickenNode.scale = SCNVector3(scaleX, scaleY, scaleZ)
-            coord.chickenPlacementTemplate = templateContainer
-            let ghostChicken = templateContainer.clone()
-            duplicateMaterialsRecursive(ghostChicken)
-            ghostChicken.name = "ghostChicken"
-            ghostChicken.isHidden = true
-            ghostChicken.categoryBitMask = 0
-            ghostChicken.childNodes.forEach { $0.categoryBitMask = 0 }
-            applyTransparencyRecursive(0.6, to: ghostChicken)
-            scene.rootNode.addChildNode(ghostChicken)
-            coord.ghostChickenNode = ghostChicken
-        } else {
-            let ghostChicken = makeGhostFarmObjNode(cellW: farmObjCellSize, cellH: farmObjCellSize)
-            ghostChicken.name = "ghostChicken"
-            ghostChicken.isHidden = true
-            ghostChicken.categoryBitMask = 0
-            scene.rootNode.addChildNode(ghostChicken)
-            coord.ghostChickenNode = ghostChicken
-        }
-        if let cornNode = Corn.loadSceneKitNode(from: .main) {
-            let templateContainer = SCNNode()
-            cornNode.position = SCNVector3Zero
-            templateContainer.addChildNode(cornNode)
-            var (minB, maxB) = templateContainer.boundingBox
-            let dx = max(CGFloat(maxB.x - minB.x), 0.1)
-            let dz = max(CGFloat(maxB.z - minB.z), 0.1)
-            let scaleX = (CGFloat(farmObjCellSize) * cellSizeW) / dx
-            let scaleZ = (CGFloat(farmObjCellSize) * cellSizeH) / dz
-            let scaleY = min(scaleX, scaleZ)
-            cornNode.scale = SCNVector3(scaleX, scaleY, scaleZ)
-            coord.cornPlacementTemplate = templateContainer
-            let ghostCorn = templateContainer.clone()
-            duplicateMaterialsRecursive(ghostCorn)
-            ghostCorn.name = "ghostCorn"
-            ghostCorn.isHidden = true
-            ghostCorn.categoryBitMask = 0
-            ghostCorn.childNodes.forEach { $0.categoryBitMask = 0 }
-            applyTransparencyRecursive(0.6, to: ghostCorn)
-            scene.rootNode.addChildNode(ghostCorn)
-            coord.ghostCornNode = ghostCorn
-        } else {
-            let ghostCorn = makeGhostFarmObjNode(cellW: farmObjCellSize, cellH: farmObjCellSize)
-            ghostCorn.name = "ghostCorn"
-            ghostCorn.isHidden = true
-            ghostCorn.categoryBitMask = 0
-            scene.rootNode.addChildNode(ghostCorn)
-            coord.ghostCornNode = ghostCorn
-        }
-
-        // Template i ghost za Smočnicu (Granary) – 2×2 ćelije.
-        let granaryCellSize = 2
-        if let granaryNode = Granary.loadSceneKitNode(from: .main) {
-            let templateContainer = SCNNode()
-            granaryNode.position = SCNVector3Zero
-            templateContainer.addChildNode(granaryNode)
-            var (minB, maxB) = templateContainer.boundingBox
-            let dx = max(CGFloat(maxB.x - minB.x), 0.1)
-            let dz = max(CGFloat(maxB.z - minB.z), 0.1)
-            let scaleX = (CGFloat(granaryCellSize) * cellSizeW) / dx
-            let scaleZ = (CGFloat(granaryCellSize) * cellSizeH) / dz
-            let scaleY = min(scaleX, scaleZ)
-            granaryNode.scale = SCNVector3(scaleX, scaleY, scaleZ)
-            coord.granaryPlacementTemplate = templateContainer
-            let ghostGranaryNode = templateContainer.clone()
-            duplicateMaterialsRecursive(ghostGranaryNode)
-            ghostGranaryNode.name = "ghostGranary"
-            ghostGranaryNode.isHidden = true
-            ghostGranaryNode.categoryBitMask = 0
-            ghostGranaryNode.childNodes.forEach { $0.categoryBitMask = 0 }
-            applyTransparencyRecursive(0.6, to: ghostGranaryNode)
-            scene.rootNode.addChildNode(ghostGranaryNode)
-            coord.ghostGranaryNode = ghostGranaryNode
-        } else {
-            let ghostGranaryNode = makeGhostFarmObjNode(cellW: granaryCellSize, cellH: granaryCellSize)
-            ghostGranaryNode.name = "ghostGranary"
-            ghostGranaryNode.isHidden = true
-            ghostGranaryNode.categoryBitMask = 0
-            scene.rootNode.addChildNode(ghostGranaryNode)
-            coord.ghostGranaryNode = ghostGranaryNode
-        }
-
-        // Template i ghost za Zdenac (Well) i Hotel – 2×2 ćelije (House button).
-        let houseObjCellSize = 2
-        if let wellNode = Well.loadSceneKitNode(from: .main) {
-            let templateContainer = SCNNode()
-            wellNode.position = SCNVector3Zero
-            templateContainer.addChildNode(wellNode)
-            var (minB, maxB) = templateContainer.boundingBox
-            let dx = max(CGFloat(maxB.x - minB.x), 0.1)
-            let dz = max(CGFloat(maxB.z - minB.z), 0.1)
-            let scaleX = (CGFloat(houseObjCellSize) * cellSizeW) / dx
-            let scaleZ = (CGFloat(houseObjCellSize) * cellSizeH) / dz
-            let scaleY = min(scaleX, scaleZ)
-            wellNode.scale = SCNVector3(scaleX, scaleY, scaleZ)
-            coord.wellPlacementTemplate = templateContainer
-            let ghostWellNode = templateContainer.clone()
-            duplicateMaterialsRecursive(ghostWellNode)
-            ghostWellNode.name = "ghostWell"
-            ghostWellNode.isHidden = true
-            ghostWellNode.categoryBitMask = 0
-            ghostWellNode.childNodes.forEach { $0.categoryBitMask = 0 }
-            applyTransparencyRecursive(0.6, to: ghostWellNode)
-            scene.rootNode.addChildNode(ghostWellNode)
-            coord.ghostWellNode = ghostWellNode
-        } else {
-            let ghostWellNode = makeGhostFarmObjNode(cellW: houseObjCellSize, cellH: houseObjCellSize)
-            ghostWellNode.name = "ghostWell"
-            ghostWellNode.isHidden = true
-            ghostWellNode.categoryBitMask = 0
-            scene.rootNode.addChildNode(ghostWellNode)
-            coord.ghostWellNode = ghostWellNode
-        }
-        if let hotelNode = Hotel.loadSceneKitNode(from: .main) {
-            let templateContainer = SCNNode()
-            hotelNode.position = SCNVector3Zero
-            templateContainer.addChildNode(hotelNode)
-            var (minB, maxB) = templateContainer.boundingBox
-            let dx = max(CGFloat(maxB.x - minB.x), 0.1)
-            let dz = max(CGFloat(maxB.z - minB.z), 0.1)
-            let scaleX = (CGFloat(houseObjCellSize) * cellSizeW) / dx
-            let scaleZ = (CGFloat(houseObjCellSize) * cellSizeH) / dz
-            let scaleY = min(scaleX, scaleZ)
-            hotelNode.scale = SCNVector3(scaleX, scaleY, scaleZ)
-            coord.hotelPlacementTemplate = templateContainer
-            let ghostHotelNode = templateContainer.clone()
-            duplicateMaterialsRecursive(ghostHotelNode)
-            ghostHotelNode.name = "ghostHotel"
-            ghostHotelNode.isHidden = true
-            ghostHotelNode.categoryBitMask = 0
-            ghostHotelNode.childNodes.forEach { $0.categoryBitMask = 0 }
-            applyTransparencyRecursive(0.6, to: ghostHotelNode)
-            scene.rootNode.addChildNode(ghostHotelNode)
-            coord.ghostHotelNode = ghostHotelNode
-        } else {
-            let ghostHotelNode = makeGhostFarmObjNode(cellW: houseObjCellSize, cellH: houseObjCellSize)
-            ghostHotelNode.name = "ghostHotel"
-            ghostHotelNode.isHidden = true
-            ghostHotelNode.categoryBitMask = 0
-            scene.rootNode.addChildNode(ghostHotelNode)
-            coord.ghostHotelNode = ghostHotelNode
-        }
-
-        // Template i ghost za Željezaru (Iron) i Kamenolom (Stone) – 2×2 ćelije (Rudnik/Industrija).
-        let industryObjCellSize = 2
-        if let ironNode = Iron.loadSceneKitNode(from: .main) {
-            let templateContainer = SCNNode()
-            ironNode.position = SCNVector3Zero
-            templateContainer.addChildNode(ironNode)
-            var (minB, maxB) = templateContainer.boundingBox
-            let dx = max(CGFloat(maxB.x - minB.x), 0.1)
-            let dz = max(CGFloat(maxB.z - minB.z), 0.1)
-            let scaleX = (CGFloat(industryObjCellSize) * cellSizeW) / dx
-            let scaleZ = (CGFloat(industryObjCellSize) * cellSizeH) / dz
-            let scaleY = min(scaleX, scaleZ)
-            ironNode.scale = SCNVector3(scaleX, scaleY, scaleZ)
-            coord.ironPlacementTemplate = templateContainer
-            let ghostIronNode = templateContainer.clone()
-            duplicateMaterialsRecursive(ghostIronNode)
-            ghostIronNode.name = "ghostIron"
-            ghostIronNode.isHidden = true
-            ghostIronNode.categoryBitMask = 0
-            ghostIronNode.childNodes.forEach { $0.categoryBitMask = 0 }
-            applyTransparencyRecursive(0.6, to: ghostIronNode)
-            scene.rootNode.addChildNode(ghostIronNode)
-            coord.ghostIronNode = ghostIronNode
-        } else {
-            let ghostIronNode = makeGhostFarmObjNode(cellW: industryObjCellSize, cellH: industryObjCellSize)
-            ghostIronNode.name = "ghostIron"
-            ghostIronNode.isHidden = true
-            ghostIronNode.categoryBitMask = 0
-            scene.rootNode.addChildNode(ghostIronNode)
-            coord.ghostIronNode = ghostIronNode
-        }
-        if let stoneNode = Stone.loadSceneKitNode(from: .main) {
-            let templateContainer = SCNNode()
-            stoneNode.position = SCNVector3Zero
-            templateContainer.addChildNode(stoneNode)
-            var (minB, maxB) = templateContainer.boundingBox
-            let dx = max(CGFloat(maxB.x - minB.x), 0.1)
-            let dz = max(CGFloat(maxB.z - minB.z), 0.1)
-            let scaleX = (CGFloat(industryObjCellSize) * cellSizeW) / dx
-            let scaleZ = (CGFloat(industryObjCellSize) * cellSizeH) / dz
-            let scaleY = min(scaleX, scaleZ)
-            stoneNode.scale = SCNVector3(scaleX, scaleY, scaleZ)
-            coord.stonePlacementTemplate = templateContainer
-            let ghostStoneNode = templateContainer.clone()
-            duplicateMaterialsRecursive(ghostStoneNode)
-            ghostStoneNode.name = "ghostStone"
-            ghostStoneNode.isHidden = true
-            ghostStoneNode.categoryBitMask = 0
-            ghostStoneNode.childNodes.forEach { $0.categoryBitMask = 0 }
-            applyTransparencyRecursive(0.6, to: ghostStoneNode)
-            scene.rootNode.addChildNode(ghostStoneNode)
-            coord.ghostStoneNode = ghostStoneNode
-        } else {
-            let ghostStoneNode = makeGhostFarmObjNode(cellW: industryObjCellSize, cellH: industryObjCellSize)
-            ghostStoneNode.name = "ghostStone"
-            ghostStoneNode.isHidden = true
-            ghostStoneNode.categoryBitMask = 0
-            scene.rootNode.addChildNode(ghostStoneNode)
-            coord.ghostStoneNode = ghostStoneNode
+        // Template i ghost po objectId – jedan izvor (SceneKitPlacementRegistry); koristi cache ako je loader završio (klon da se ne mutira cache).
+        for config in SceneKitPlacementRegistry.allConfigs {
+            let cachedRaw = loader.isLoaded ? loader.cachedPlacementNode(objectId: config.objectId) : nil
+            let cachedNode = cachedRaw?.clone()
+            let (template, ghost) = makeTemplateAndGhost(config: config, cachedNode: cachedNode)
+            if let t = template {
+                coord.placementTemplates[config.objectId] = t
+            }
+            coord.ghostNodes[config.objectId] = ghost
+            ghost.isHidden = true
+            ghost.categoryBitMask = 0
+            ghost.childNodes.forEach { $0.categoryBitMask = 0 }
+            scene.rootNode.addChildNode(ghost)
         }
 
         coord.lastGridZoom = CGFloat(gameState.mapCameraSettings.currentZoom)
@@ -947,292 +711,25 @@ struct SceneKitMapView: NSViewRepresentable {
 
         container.onMouseMove = { [gameState] loc in
             let objId = gameState.selectedPlacementObjectId
-            let isWall = objId == Wall.objectId
-            let isMarket = objId == Market.objectId
-            let isWindmill = objId == Windmill.objectId
-            let isBakery = objId == Bakery.objectId
-            let isGranary = objId == Granary.objectId
-            let isWell = objId == Well.objectId
-            let isHotel = objId == Hotel.objectId
-            let isIron = objId == Iron.objectId
-            let isStone = objId == Stone.objectId
-            let isChicken = objId == Chicken.objectId
-            let isCorn = objId == Corn.objectId
-            guard isWall || isMarket || isWindmill || isBakery || isGranary || isWell || isHotel || isIron || isStone || isChicken || isCorn else {
-                coord.ghostPlacementNode?.isHidden = true
-                coord.ghostMarketNode?.isHidden = true
-                coord.ghostWindmillNode?.isHidden = true
-                coord.ghostBakeryNode?.isHidden = true
-                coord.ghostGranaryNode?.isHidden = true
-                coord.ghostWellNode?.isHidden = true
-                coord.ghostHotelNode?.isHidden = true
-                coord.ghostIronNode?.isHidden = true
-                coord.ghostStoneNode?.isHidden = true
-                coord.ghostChickenNode?.isHidden = true
-                coord.ghostCornNode?.isHidden = true
-                return
-            }
-            guard let sv = container.scnView else {
-                coord.ghostPlacementNode?.isHidden = true
-                coord.ghostMarketNode?.isHidden = true
-                coord.ghostWindmillNode?.isHidden = true
-                coord.ghostBakeryNode?.isHidden = true
-                coord.ghostGranaryNode?.isHidden = true
-                coord.ghostWellNode?.isHidden = true
-                coord.ghostHotelNode?.isHidden = true
-                coord.ghostIronNode?.isHidden = true
-                coord.ghostStoneNode?.isHidden = true
-                coord.ghostChickenNode?.isHidden = true
-                coord.ghostCornNode?.isHidden = true
-                return
-            }
-            let hitPointInView = container.convert(loc, to: sv)
-            guard sv.bounds.contains(hitPointInView) else {
-                coord.ghostPlacementNode?.isHidden = true
-                coord.ghostMarketNode?.isHidden = true
-                coord.ghostWindmillNode?.isHidden = true
-                coord.ghostBakeryNode?.isHidden = true
-                coord.ghostGranaryNode?.isHidden = true
-                coord.ghostWellNode?.isHidden = true
-                coord.ghostHotelNode?.isHidden = true
-                coord.ghostIronNode?.isHidden = true
-                coord.ghostStoneNode?.isHidden = true
-                coord.ghostChickenNode?.isHidden = true
-                coord.ghostCornNode?.isHidden = true
-                return
-            }
-            let hitOptions: [SCNHitTestOption: Any] = [
-                .searchMode: SCNHitTestSearchMode.all.rawValue,
-                .categoryBitMask: 1
-            ]
-            let hits = sv.hitTest(hitPointInView, options: hitOptions)
+            coord.ghostNodes.values.forEach { $0.isHidden = true }
+            guard let objectId = objId, SceneKitPlacementRegistry.placeableObjectIds.contains(objectId),
+                  let ghost = coord.ghostNodes[objectId],
+                  let config = SceneKitPlacementRegistry.config(for: objectId) else { return }
+            guard let sv = container.scnView, sv.bounds.contains(container.convert(loc, to: sv)) else { return }
+            let hitOptions: [SCNHitTestOption: Any] = [.searchMode: SCNHitTestSearchMode.all.rawValue, .categoryBitMask: 1]
+            let hits = sv.hitTest(container.convert(loc, to: sv), options: hitOptions)
             guard let hit = hits.first(where: { $0.node.name == "terrain" }),
-                  let (row, col) = cellFromMapLocalPosition(hit.worldCoordinates) else {
-                coord.ghostPlacementNode?.isHidden = true
-                coord.ghostMarketNode?.isHidden = true
-                coord.ghostWindmillNode?.isHidden = true
-                coord.ghostBakeryNode?.isHidden = true
-                coord.ghostGranaryNode?.isHidden = true
-                coord.ghostWellNode?.isHidden = true
-                coord.ghostHotelNode?.isHidden = true
-                coord.ghostIronNode?.isHidden = true
-                coord.ghostStoneNode?.isHidden = true
-                coord.ghostChickenNode?.isHidden = true
-                coord.ghostCornNode?.isHidden = true
-                return
-            }
+                  let (row, col) = cellFromMapLocalPosition(hit.worldCoordinates) else { return }
             let ghostColor = NSColor(red: 0.15, green: 0.95, blue: 0.25, alpha: 1)
-            // Y pozicija: dno modela na terenu (y=0) – koristimo -boundingBox.min.y kao za postavljene objekte.
-            if isWall, let ghost = coord.ghostPlacementNode {
-                let pos = worldPositionAtCell(row: row, col: col)
-                var (minB, _) = ghost.boundingBox
-                let y = -CGFloat(minB.y)
-                applyGhostColorRecursive(coord.ghostPlacementNode, color: ghostColor, transparency: 0.55)
-                ghost.position = SCNVector3(pos.x, y, pos.z)
-                coord.ghostPlacementNode?.isHidden = false
-                coord.ghostMarketNode?.isHidden = true
-                coord.ghostWindmillNode?.isHidden = true
-                coord.ghostBakeryNode?.isHidden = true
-                coord.ghostGranaryNode?.isHidden = true
-                coord.ghostWellNode?.isHidden = true
-                coord.ghostHotelNode?.isHidden = true
-                coord.ghostIronNode?.isHidden = true
-                coord.ghostStoneNode?.isHidden = true
-                coord.ghostChickenNode?.isHidden = true
-                coord.ghostCornNode?.isHidden = true
-            } else if isMarket, let ghost = coord.ghostMarketNode {
-                let centerRow = row + 3 / 2
-                let centerCol = col + 3 / 2
-                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
-                var (minB, _) = ghost.boundingBox
-                let y = -CGFloat(minB.y)
-                applyGhostColorRecursive(coord.ghostMarketNode, color: ghostColor, transparency: 0.55)
-                ghost.position = SCNVector3(pos.x, y, pos.z)
-                coord.ghostMarketNode?.isHidden = false
-                coord.ghostPlacementNode?.isHidden = true
-                coord.ghostWindmillNode?.isHidden = true
-                coord.ghostBakeryNode?.isHidden = true
-                coord.ghostGranaryNode?.isHidden = true
-                coord.ghostWellNode?.isHidden = true
-                coord.ghostHotelNode?.isHidden = true
-                coord.ghostIronNode?.isHidden = true
-                coord.ghostStoneNode?.isHidden = true
-                coord.ghostChickenNode?.isHidden = true
-                coord.ghostCornNode?.isHidden = true
-            } else if isWindmill, let ghost = coord.ghostWindmillNode {
-                let centerRow = row + 3 / 2
-                let centerCol = col + 3 / 2
-                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
-                var (minB, _) = ghost.boundingBox
-                let windmillYOffset: CGFloat = 8
-                let y = -CGFloat(minB.y) + windmillYOffset
-                applyGhostColorRecursive(coord.ghostWindmillNode, color: ghostColor, transparency: 0.55)
-                ghost.position = SCNVector3(pos.x, y, pos.z)
-                coord.ghostWindmillNode?.isHidden = false
-                coord.ghostPlacementNode?.isHidden = true
-                coord.ghostMarketNode?.isHidden = true
-                coord.ghostBakeryNode?.isHidden = true
-                coord.ghostGranaryNode?.isHidden = true
-                coord.ghostWellNode?.isHidden = true
-                coord.ghostHotelNode?.isHidden = true
-                coord.ghostIronNode?.isHidden = true
-                coord.ghostStoneNode?.isHidden = true
-                coord.ghostChickenNode?.isHidden = true
-                coord.ghostCornNode?.isHidden = true
-            } else if isBakery, let ghost = coord.ghostBakeryNode {
-                // Pekara 2×2 – centar bloka
-                let centerRow = row + 2 / 2
-                let centerCol = col + 2 / 2
-                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
-                var (minB, _) = ghost.boundingBox
-                let y = -CGFloat(minB.y)
-                applyGhostColorRecursive(coord.ghostBakeryNode, color: ghostColor, transparency: 0.55)
-                ghost.position = SCNVector3(pos.x, y, pos.z)
-                coord.ghostBakeryNode?.isHidden = false
-                coord.ghostPlacementNode?.isHidden = true
-                coord.ghostMarketNode?.isHidden = true
-                coord.ghostWindmillNode?.isHidden = true
-                coord.ghostGranaryNode?.isHidden = true
-                coord.ghostWellNode?.isHidden = true
-                coord.ghostHotelNode?.isHidden = true
-                coord.ghostIronNode?.isHidden = true
-                coord.ghostStoneNode?.isHidden = true
-                coord.ghostChickenNode?.isHidden = true
-                coord.ghostCornNode?.isHidden = true
-            } else if isGranary, let ghost = coord.ghostGranaryNode {
-                let centerRow = row + 2 / 2
-                let centerCol = col + 2 / 2
-                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
-                var (minB, _) = ghost.boundingBox
-                let y = -CGFloat(minB.y)
-                applyGhostColorRecursive(coord.ghostGranaryNode, color: ghostColor, transparency: 0.55)
-                ghost.position = SCNVector3(pos.x, y, pos.z)
-                coord.ghostGranaryNode?.isHidden = false
-                coord.ghostPlacementNode?.isHidden = true
-                coord.ghostMarketNode?.isHidden = true
-                coord.ghostWindmillNode?.isHidden = true
-                coord.ghostBakeryNode?.isHidden = true
-                coord.ghostWellNode?.isHidden = true
-                coord.ghostHotelNode?.isHidden = true
-                coord.ghostIronNode?.isHidden = true
-                coord.ghostStoneNode?.isHidden = true
-                coord.ghostChickenNode?.isHidden = true
-                coord.ghostCornNode?.isHidden = true
-            } else if isWell, let ghost = coord.ghostWellNode {
-                let centerRow = row + 2 / 2
-                let centerCol = col + 2 / 2
-                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
-                var (minB, _) = ghost.boundingBox
-                let y = -CGFloat(minB.y)
-                applyGhostColorRecursive(coord.ghostWellNode, color: ghostColor, transparency: 0.55)
-                ghost.position = SCNVector3(pos.x, y, pos.z)
-                coord.ghostWellNode?.isHidden = false
-                coord.ghostPlacementNode?.isHidden = true
-                coord.ghostMarketNode?.isHidden = true
-                coord.ghostWindmillNode?.isHidden = true
-                coord.ghostBakeryNode?.isHidden = true
-                coord.ghostGranaryNode?.isHidden = true
-                coord.ghostHotelNode?.isHidden = true
-                coord.ghostIronNode?.isHidden = true
-                coord.ghostStoneNode?.isHidden = true
-                coord.ghostChickenNode?.isHidden = true
-                coord.ghostCornNode?.isHidden = true
-            } else if isHotel, let ghost = coord.ghostHotelNode {
-                let centerRow = row + 2 / 2
-                let centerCol = col + 2 / 2
-                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
-                var (minB, _) = ghost.boundingBox
-                let y = -CGFloat(minB.y)
-                applyGhostColorRecursive(coord.ghostHotelNode, color: ghostColor, transparency: 0.55)
-                ghost.position = SCNVector3(pos.x, y, pos.z)
-                coord.ghostHotelNode?.isHidden = false
-                coord.ghostPlacementNode?.isHidden = true
-                coord.ghostMarketNode?.isHidden = true
-                coord.ghostWindmillNode?.isHidden = true
-                coord.ghostBakeryNode?.isHidden = true
-                coord.ghostGranaryNode?.isHidden = true
-                coord.ghostWellNode?.isHidden = true
-                coord.ghostIronNode?.isHidden = true
-                coord.ghostStoneNode?.isHidden = true
-                coord.ghostChickenNode?.isHidden = true
-                coord.ghostCornNode?.isHidden = true
-            } else if isIron, let ghost = coord.ghostIronNode {
-                let centerRow = row + 2 / 2
-                let centerCol = col + 2 / 2
-                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
-                var (minB, _) = ghost.boundingBox
-                let y = -CGFloat(minB.y)
-                applyGhostColorRecursive(coord.ghostIronNode, color: ghostColor, transparency: 0.55)
-                ghost.position = SCNVector3(pos.x, y, pos.z)
-                coord.ghostIronNode?.isHidden = false
-                coord.ghostPlacementNode?.isHidden = true
-                coord.ghostMarketNode?.isHidden = true
-                coord.ghostWindmillNode?.isHidden = true
-                coord.ghostBakeryNode?.isHidden = true
-                coord.ghostGranaryNode?.isHidden = true
-                coord.ghostWellNode?.isHidden = true
-                coord.ghostHotelNode?.isHidden = true
-                coord.ghostStoneNode?.isHidden = true
-                coord.ghostChickenNode?.isHidden = true
-                coord.ghostCornNode?.isHidden = true
-            } else if isStone, let ghost = coord.ghostStoneNode {
-                let centerRow = row + 2 / 2
-                let centerCol = col + 2 / 2
-                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
-                var (minB, _) = ghost.boundingBox
-                let y = -CGFloat(minB.y)
-                applyGhostColorRecursive(coord.ghostStoneNode, color: ghostColor, transparency: 0.55)
-                ghost.position = SCNVector3(pos.x, y, pos.z)
-                coord.ghostStoneNode?.isHidden = false
-                coord.ghostPlacementNode?.isHidden = true
-                coord.ghostMarketNode?.isHidden = true
-                coord.ghostWindmillNode?.isHidden = true
-                coord.ghostBakeryNode?.isHidden = true
-                coord.ghostGranaryNode?.isHidden = true
-                coord.ghostWellNode?.isHidden = true
-                coord.ghostHotelNode?.isHidden = true
-                coord.ghostIronNode?.isHidden = true
-                coord.ghostChickenNode?.isHidden = true
-                coord.ghostCornNode?.isHidden = true
-            } else if isChicken, let ghost = coord.ghostChickenNode {
-                let centerRow = row + 2 / 2
-                let centerCol = col + 2 / 2
-                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
-                var (minB, _) = ghost.boundingBox
-                let y = -CGFloat(minB.y)
-                applyGhostColorRecursive(coord.ghostChickenNode, color: ghostColor, transparency: 0.55)
-                ghost.position = SCNVector3(pos.x, y, pos.z)
-                coord.ghostChickenNode?.isHidden = false
-                coord.ghostPlacementNode?.isHidden = true
-                coord.ghostMarketNode?.isHidden = true
-                coord.ghostWindmillNode?.isHidden = true
-                coord.ghostBakeryNode?.isHidden = true
-                coord.ghostGranaryNode?.isHidden = true
-                coord.ghostWellNode?.isHidden = true
-                coord.ghostHotelNode?.isHidden = true
-                coord.ghostIronNode?.isHidden = true
-                coord.ghostStoneNode?.isHidden = true
-                coord.ghostCornNode?.isHidden = true
-            } else if isCorn, let ghost = coord.ghostCornNode {
-                let centerRow = row + 2 / 2
-                let centerCol = col + 2 / 2
-                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
-                var (minB, _) = ghost.boundingBox
-                let y = -CGFloat(minB.y)
-                applyGhostColorRecursive(coord.ghostCornNode, color: ghostColor, transparency: 0.55)
-                ghost.position = SCNVector3(pos.x, y, pos.z)
-                coord.ghostCornNode?.isHidden = false
-                coord.ghostPlacementNode?.isHidden = true
-                coord.ghostMarketNode?.isHidden = true
-                coord.ghostWindmillNode?.isHidden = true
-                coord.ghostBakeryNode?.isHidden = true
-                coord.ghostGranaryNode?.isHidden = true
-                coord.ghostWellNode?.isHidden = true
-                coord.ghostHotelNode?.isHidden = true
-                coord.ghostIronNode?.isHidden = true
-                coord.ghostStoneNode?.isHidden = true
-                coord.ghostChickenNode?.isHidden = true
-            }
+            applyGhostColorRecursive(ghost, color: ghostColor, transparency: 0.55)
+            let (centerRow, centerCol): (Int, Int) = config.cellW == 1 && config.cellH == 1
+                ? (row, col)
+                : (row + config.cellH / 2, col + config.cellW / 2)
+            let pos = worldPositionAtCell(row: centerRow, col: centerCol)
+            var (minB, _) = ghost.boundingBox
+            let y = -CGFloat(minB.y) + config.yOffset
+            ghost.position = SCNVector3(pos.x, y, pos.z)
+            ghost.isHidden = false
         }
 
         scnView.scene = scene
@@ -1241,8 +738,9 @@ struct SceneKitMapView: NSViewRepresentable {
         scnView.delegate = coord
         applyCamera(cameraNode: cameraNode, targetNode: cameraTarget, settings: gameState.mapCameraSettings)
         gridNode.isHidden = !showGrid
-        refreshPlacements(placementsNode, placements: gameState.gameMap.placements, wallTemplate: coord.wallPlacementTemplate, marketTemplate: coord.marketPlacementTemplate, windmillTemplate: coord.windmillPlacementTemplate, bakeryTemplate: coord.bakeryPlacementTemplate, granaryTemplate: coord.granaryPlacementTemplate, wellTemplate: coord.wellPlacementTemplate, hotelTemplate: coord.hotelPlacementTemplate, ironTemplate: coord.ironPlacementTemplate, stoneTemplate: coord.stonePlacementTemplate, chickenTemplate: coord.chickenPlacementTemplate, cornTemplate: coord.cornPlacementTemplate)
+        refreshPlacements(placementsNode, placements: gameState.gameMap.placements, templates: coord.placementTemplates)
         DispatchQueue.main.async {
+            gameState.levelLoadingMessage = nil
             gameState.isLevelReady = true
             gameState.runSoloResourceAnimationIfNeeded()
         }
@@ -1275,7 +773,7 @@ struct SceneKitMapView: NSViewRepresentable {
                 if container.isEraseMode, let onRemoveAt = onRemoveAt {
                 onRemoveAt(row, col)
                 if let node = coord.placementsNode {
-                    refreshPlacements(node, placements: gameState.gameMap.placements, wallTemplate: coord.wallPlacementTemplate, marketTemplate: coord.marketPlacementTemplate, windmillTemplate: coord.windmillPlacementTemplate, bakeryTemplate: coord.bakeryPlacementTemplate, granaryTemplate: coord.granaryPlacementTemplate, wellTemplate: coord.wellPlacementTemplate, hotelTemplate: coord.hotelPlacementTemplate, ironTemplate: coord.ironPlacementTemplate, stoneTemplate: coord.stonePlacementTemplate, chickenTemplate: coord.chickenPlacementTemplate, cornTemplate: coord.cornPlacementTemplate)
+                    refreshPlacements(node, placements: gameState.gameMap.placements, templates: coord.placementTemplates)
                 }
                 return
             }
@@ -1291,7 +789,7 @@ struct SceneKitMapView: NSViewRepresentable {
                 }
                 let ok = gameState.placeSelectedObjectAt(row: row, col: col)
                 if ok, let node = coord.placementsNode {
-                    refreshPlacements(node, placements: gameState.gameMap.placements, wallTemplate: coord.wallPlacementTemplate, marketTemplate: coord.marketPlacementTemplate, windmillTemplate: coord.windmillPlacementTemplate, bakeryTemplate: coord.bakeryPlacementTemplate, granaryTemplate: coord.granaryPlacementTemplate, wellTemplate: coord.wellPlacementTemplate, hotelTemplate: coord.hotelPlacementTemplate, ironTemplate: coord.ironPlacementTemplate, stoneTemplate: coord.stonePlacementTemplate, chickenTemplate: coord.chickenPlacementTemplate, cornTemplate: coord.cornPlacementTemplate)
+                    refreshPlacements(node, placements: gameState.gameMap.placements, templates: coord.placementTemplates)
                 }
             }
         }
@@ -1356,38 +854,9 @@ struct SceneKitMapView: NSViewRepresentable {
             )
             pivot.isHidden = !showPivotIndicator
         }
-        if let ghost = coord.ghostPlacementNode {
-            ghost.isHidden = gameState.selectedPlacementObjectId != Wall.objectId
-        }
-        if let ghostMarket = coord.ghostMarketNode {
-            ghostMarket.isHidden = gameState.selectedPlacementObjectId != Market.objectId
-        }
-        if let ghostWindmill = coord.ghostWindmillNode {
-            ghostWindmill.isHidden = gameState.selectedPlacementObjectId != Windmill.objectId
-        }
-        if let ghostBakery = coord.ghostBakeryNode {
-            ghostBakery.isHidden = gameState.selectedPlacementObjectId != Bakery.objectId
-        }
-        if let ghostGranary = coord.ghostGranaryNode {
-            ghostGranary.isHidden = gameState.selectedPlacementObjectId != Granary.objectId
-        }
-        if let ghostWell = coord.ghostWellNode {
-            ghostWell.isHidden = gameState.selectedPlacementObjectId != Well.objectId
-        }
-        if let ghostHotel = coord.ghostHotelNode {
-            ghostHotel.isHidden = gameState.selectedPlacementObjectId != Hotel.objectId
-        }
-        if let ghostIron = coord.ghostIronNode {
-            ghostIron.isHidden = gameState.selectedPlacementObjectId != Iron.objectId
-        }
-        if let ghostStone = coord.ghostStoneNode {
-            ghostStone.isHidden = gameState.selectedPlacementObjectId != Stone.objectId
-        }
-        if let ghostChicken = coord.ghostChickenNode {
-            ghostChicken.isHidden = gameState.selectedPlacementObjectId != Chicken.objectId
-        }
-        if let ghostCorn = coord.ghostCornNode {
-            ghostCorn.isHidden = gameState.selectedPlacementObjectId != Corn.objectId
+        let selectedId = gameState.selectedPlacementObjectId
+        for (objectId, ghost) in coord.ghostNodes {
+            ghost.isHidden = selectedId != objectId
         }
         if let grid = coord.gridNode {
             grid.isHidden = !showGrid
@@ -1445,174 +914,56 @@ struct SceneKitMapView: NSViewRepresentable {
         )
     }
 
-    private func refreshPlacements(_ node: SCNNode?, placements: [Placement], wallTemplate: SCNNode?, marketTemplate: SCNNode?, windmillTemplate: SCNNode?, bakeryTemplate: SCNNode?, granaryTemplate: SCNNode?, wellTemplate: SCNNode?, hotelTemplate: SCNNode?, ironTemplate: SCNNode?, stoneTemplate: SCNNode?, chickenTemplate: SCNNode?, cornTemplate: SCNNode?) {
+    private func refreshPlacements(_ node: SCNNode?, placements: [Placement], templates: [String: SCNNode]) {
         guard let node = node else { return }
         node.childNodes.forEach { $0.removeFromParentNode() }
         node.isHidden = false
-        let wallBoxFallback = makePlacementBoxNode()
-        wallBoxFallback.categoryBitMask = 0
+        let boxFallback = makePlacementBoxNode()
+        boxFallback.categoryBitMask = 0
         for p in placements {
-            if p.objectId == Market.objectId, let template = marketTemplate?.clone(), !template.childNodes.isEmpty {
-                // Tržnica 3×3 – jedan čvor na centru bloka
-                let centerRow = p.row + p.height / 2
-                let centerCol = p.col + p.width / 2
-                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
-                var (minB, _) = template.boundingBox
-                template.position = SCNVector3(pos.x, -CGFloat(minB.y), pos.z)
-                template.isHidden = false
-                template.categoryBitMask = 0
-                template.childNodes.forEach {
-                    $0.categoryBitMask = 0
-                    $0.isHidden = false
-                }
-                _ = Market.reapplyTexture(to: template, bundle: .main)
-                node.addChildNode(template)
+            guard let config = SceneKitPlacementRegistry.config(for: p.objectId) else {
+                addFallbackBoxes(for: p, to: node, fallback: boxFallback)
                 continue
             }
-            if p.objectId == Windmill.objectId, let template = windmillTemplate?.clone(), !template.childNodes.isEmpty {
-                // Mlin 3×3 – jedan čvor na centru bloka (malo povišen)
-                let centerRow = p.row + p.height / 2
-                let centerCol = p.col + p.width / 2
-                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
-                var (minB, _) = template.boundingBox
-                let windmillYOffset: CGFloat = 8
-                template.position = SCNVector3(pos.x, -CGFloat(minB.y) + windmillYOffset, pos.z)
-                template.isHidden = false
-                template.categoryBitMask = 0
-                template.childNodes.forEach {
-                    $0.categoryBitMask = 0
-                    $0.isHidden = false
-                }
-                _ = Windmill.reapplyTexture(to: template, bundle: .main)
-                node.addChildNode(template)
-                continue
-            }
-            if p.objectId == Bakery.objectId, let template = bakeryTemplate?.clone(), !template.childNodes.isEmpty {
-                let centerRow = p.row + p.height / 2
-                let centerCol = p.col + p.width / 2
-                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
-                var (minB, _) = template.boundingBox
-                template.position = SCNVector3(pos.x, -CGFloat(minB.y), pos.z)
+            if let template = templates[p.objectId]?.clone(), !template.childNodes.isEmpty {
                 template.isHidden = false
                 template.categoryBitMask = 0
                 template.childNodes.forEach { $0.categoryBitMask = 0; $0.isHidden = false }
-                _ = Bakery.reapplyTexture(to: template, bundle: .main)
-                node.addChildNode(template)
-                continue
-            }
-            if p.objectId == Granary.objectId, let template = granaryTemplate?.clone(), !template.childNodes.isEmpty {
-                let centerRow = p.row + p.height / 2
-                let centerCol = p.col + p.width / 2
-                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
-                var (minB, _) = template.boundingBox
-                template.position = SCNVector3(pos.x, -CGFloat(minB.y), pos.z)
-                template.isHidden = false
-                template.categoryBitMask = 0
-                template.childNodes.forEach { $0.categoryBitMask = 0; $0.isHidden = false }
-                _ = Granary.reapplyTexture(to: template, bundle: .main)
-                node.addChildNode(template)
-                continue
-            }
-            if p.objectId == Well.objectId, let template = wellTemplate?.clone(), !template.childNodes.isEmpty {
-                let centerRow = p.row + p.height / 2
-                let centerCol = p.col + p.width / 2
-                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
-                var (minB, _) = template.boundingBox
-                template.position = SCNVector3(pos.x, -CGFloat(minB.y), pos.z)
-                template.isHidden = false
-                template.categoryBitMask = 0
-                template.childNodes.forEach { $0.categoryBitMask = 0; $0.isHidden = false }
-                _ = Well.reapplyTexture(to: template, bundle: .main)
-                node.addChildNode(template)
-                continue
-            }
-            if p.objectId == Hotel.objectId, let template = hotelTemplate?.clone(), !template.childNodes.isEmpty {
-                let centerRow = p.row + p.height / 2
-                let centerCol = p.col + p.width / 2
-                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
-                var (minB, _) = template.boundingBox
-                template.position = SCNVector3(pos.x, -CGFloat(minB.y), pos.z)
-                template.isHidden = false
-                template.categoryBitMask = 0
-                template.childNodes.forEach { $0.categoryBitMask = 0; $0.isHidden = false }
-                _ = Hotel.reapplyTexture(to: template, bundle: .main)
-                node.addChildNode(template)
-                continue
-            }
-            if p.objectId == Iron.objectId, let template = ironTemplate?.clone(), !template.childNodes.isEmpty {
-                let centerRow = p.row + p.height / 2
-                let centerCol = p.col + p.width / 2
-                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
-                var (minB, _) = template.boundingBox
-                template.position = SCNVector3(pos.x, -CGFloat(minB.y), pos.z)
-                template.isHidden = false
-                template.categoryBitMask = 0
-                template.childNodes.forEach { $0.categoryBitMask = 0; $0.isHidden = false }
-                _ = Iron.reapplyTexture(to: template, bundle: .main)
-                node.addChildNode(template)
-                continue
-            }
-            if p.objectId == Stone.objectId, let template = stoneTemplate?.clone(), !template.childNodes.isEmpty {
-                let centerRow = p.row + p.height / 2
-                let centerCol = p.col + p.width / 2
-                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
-                var (minB, _) = template.boundingBox
-                template.position = SCNVector3(pos.x, -CGFloat(minB.y), pos.z)
-                template.isHidden = false
-                template.categoryBitMask = 0
-                template.childNodes.forEach { $0.categoryBitMask = 0; $0.isHidden = false }
-                _ = Stone.reapplyTexture(to: template, bundle: .main)
-                node.addChildNode(template)
-                continue
-            }
-            if p.objectId == Chicken.objectId, let template = chickenTemplate?.clone(), !template.childNodes.isEmpty {
-                let centerRow = p.row + p.height / 2
-                let centerCol = p.col + p.width / 2
-                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
-                var (minB, _) = template.boundingBox
-                template.position = SCNVector3(pos.x, -CGFloat(minB.y), pos.z)
-                template.isHidden = false
-                template.categoryBitMask = 0
-                template.childNodes.forEach { $0.categoryBitMask = 0; $0.isHidden = false }
-                _ = Chicken.reapplyTexture(to: template, bundle: .main)
-                node.addChildNode(template)
-                continue
-            }
-            if p.objectId == Corn.objectId, let template = cornTemplate?.clone(), !template.childNodes.isEmpty {
-                let centerRow = p.row + p.height / 2
-                let centerCol = p.col + p.width / 2
-                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
-                var (minB, _) = template.boundingBox
-                template.position = SCNVector3(pos.x, -CGFloat(minB.y), pos.z)
-                template.isHidden = false
-                template.categoryBitMask = 0
-                template.childNodes.forEach { $0.categoryBitMask = 0; $0.isHidden = false }
-                _ = Corn.reapplyTexture(to: template, bundle: .main)
-                node.addChildNode(template)
-                continue
-            }
-            for r in p.row..<(p.row + p.height) {
-                for c in p.col..<(p.col + p.width) {
-                    let pos = worldPositionAtCell(row: r, col: c)
-                    if p.objectId == Wall.objectId, let template = wallTemplate?.clone(), !template.childNodes.isEmpty {
-                        var (minB, _) = template.boundingBox
-                        template.position = SCNVector3(pos.x, -CGFloat(minB.y), pos.z)
-                        template.isHidden = false
-                        template.categoryBitMask = 0
-                        template.childNodes.forEach {
-                            $0.categoryBitMask = 0
-                            $0.isHidden = false
+                if config.cellW == 1 && config.cellH == 1 {
+                    for r in p.row..<(p.row + p.height) {
+                        for c in p.col..<(p.col + p.width) {
+                            let pos = worldPositionAtCell(row: r, col: c)
+                            let instance = template.clone()
+                            var (minB, _) = instance.boundingBox
+                            instance.position = SCNVector3(pos.x, -CGFloat(minB.y), pos.z)
+                            _ = SceneKitPlacementRegistry.reapplyTexture(objectId: p.objectId, to: instance, bundle: .main)
+                            node.addChildNode(instance)
                         }
-                        _ = Wall.reapplyTexture(to: template, bundle: .main)
-                        node.addChildNode(template)
-                    } else {
-                        let n = wallBoxFallback.clone()
-                        n.position = pos
-                        n.isHidden = false
-                        n.categoryBitMask = 0
-                        node.addChildNode(n)
                     }
+                } else {
+                    let centerRow = p.row + p.height / 2
+                    let centerCol = p.col + p.width / 2
+                    let pos = worldPositionAtCell(row: centerRow, col: centerCol)
+                    var (minB, _) = template.boundingBox
+                    template.position = SCNVector3(pos.x, -CGFloat(minB.y) + config.yOffset, pos.z)
+                    _ = SceneKitPlacementRegistry.reapplyTexture(objectId: p.objectId, to: template, bundle: .main)
+                    node.addChildNode(template)
                 }
+            } else {
+                addFallbackBoxes(for: p, to: node, fallback: boxFallback)
+            }
+        }
+    }
+
+    private func addFallbackBoxes(for p: Placement, to node: SCNNode, fallback: SCNNode) {
+        for r in p.row..<(p.row + p.height) {
+            for c in p.col..<(p.col + p.width) {
+                let pos = worldPositionAtCell(row: r, col: c)
+                let n = fallback.clone()
+                n.position = pos
+                n.isHidden = false
+                n.categoryBitMask = 0
+                node.addChildNode(n)
             }
         }
     }
@@ -1624,6 +975,35 @@ struct SceneKitMapView: NSViewRepresentable {
         box.firstMaterial?.lightingModel = .constant
         let n = SCNNode(geometry: box)
         return n
+    }
+
+    /// Za jedan objectId: učitaj model (ili koristi `cachedNode`), skaliaj na cellW×cellH, vrati (template, ghost). Ako model nije učitan, ghost = fallback box.
+    private func makeTemplateAndGhost(config: SceneKitPlacementConfig, cachedNode: SCNNode? = nil) -> (template: SCNNode?, ghost: SCNNode) {
+        let cw = CGFloat(config.cellW)
+        let ch = CGFloat(config.cellH)
+        let placementNode = cachedNode ?? SceneKitPlacementRegistry.loadSceneKitNode(objectId: config.objectId, bundle: .main)
+        guard let placementNode = placementNode else {
+            let fallbackGhost = makeGhostFarmObjNode(cellW: config.cellW, cellH: config.cellH)
+            return (nil, fallbackGhost)
+        }
+        let templateContainer = SCNNode()
+        placementNode.position = SCNVector3Zero
+        templateContainer.addChildNode(placementNode)
+        var (minB, maxB) = templateContainer.boundingBox
+        let dx = max(CGFloat(maxB.x - minB.x), 0.1)
+        let dz = max(CGFloat(maxB.z - minB.z), 0.1)
+        let scaleX = (cw * cellSizeW) / dx
+        let scaleZ = (ch * cellSizeH) / dz
+        let scaleY = min(scaleX, scaleZ)
+        placementNode.scale = SCNVector3(scaleX, scaleY, scaleZ)
+        let ghostNode = templateContainer.clone()
+        duplicateMaterialsRecursive(ghostNode)
+        ghostNode.name = "ghost_\(config.objectId)"
+        ghostNode.isHidden = true
+        ghostNode.categoryBitMask = 0
+        ghostNode.childNodes.forEach { $0.categoryBitMask = 0 }
+        applyTransparencyRecursive(0.6, to: ghostNode)
+        return (templateContainer, ghostNode)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -1640,28 +1020,10 @@ struct SceneKitMapView: NSViewRepresentable {
         var cameraTarget: SCNNode?
         var pivotIndicatorNode: SCNNode?
         var gridNode: SCNNode?
-        var ghostPlacementNode: SCNNode?
-        var ghostMarketNode: SCNNode?
-        var ghostWindmillNode: SCNNode?
-        var ghostBakeryNode: SCNNode?
-        var bakeryPlacementTemplate: SCNNode?
-        var ghostGranaryNode: SCNNode?
-        var granaryPlacementTemplate: SCNNode?
-        var ghostWellNode: SCNNode?
-        var wellPlacementTemplate: SCNNode?
-        var ghostHotelNode: SCNNode?
-        var hotelPlacementTemplate: SCNNode?
-        var ghostIronNode: SCNNode?
-        var ironPlacementTemplate: SCNNode?
-        var ghostStoneNode: SCNNode?
-        var stonePlacementTemplate: SCNNode?
-        var ghostChickenNode: SCNNode?
-        var ghostCornNode: SCNNode?
-        var wallPlacementTemplate: SCNNode?
-        var marketPlacementTemplate: SCNNode?
-        var windmillPlacementTemplate: SCNNode?
-        var chickenPlacementTemplate: SCNNode?
-        var cornPlacementTemplate: SCNNode?
+        /// Template po objectId – za kloniranje pri refreshPlacements.
+        var placementTemplates: [String: SCNNode] = [:]
+        /// Ghost čvor po objectId – prikazuje se pri pomicanju miša kad je objekt odabran.
+        var ghostNodes: [String: SCNNode] = [:]
         var lastGridZoom: CGFloat = 1
         weak var gameState: GameState?
         /// Glatka animacija: interpolira se prema target zoomu (iz gameState).
@@ -1694,71 +1056,7 @@ struct SceneKitMapView: NSViewRepresentable {
         }
     }
 
-    /// Ghost 3D zid – 1×1 ćelija, skaliran iz omjera modela, poluproziran.
-    private func makeGhostWallNode() -> SCNNode {
-        let container = SCNNode()
-        guard let wallNode = Wall.loadSceneKitNode(from: .main) else {
-            return container
-        }
-        wallNode.position = SCNVector3Zero
-        container.addChildNode(wallNode)
-        var (minB, maxB) = container.boundingBox
-        let dx = max(CGFloat(maxB.x - minB.x), 0.1)
-        let dz = max(CGFloat(maxB.z - minB.z), 0.1)
-        let scaleX = cellSizeW / dx
-        let scaleZ = cellSizeH / dz
-        let scaleY = min(scaleX, scaleZ)
-        wallNode.scale = SCNVector3(scaleX, scaleY, scaleZ)
-        applyTransparencyRecursive(0.6, to: container)
-        return container
-    }
-
-    /// Ghost 3D tržnice – skaliran na 3×3 ćelije, poluproziran (zelena pri pomicanju).
-    private func makeGhostMarketNode() -> SCNNode {
-        let container = SCNNode()
-        guard let marketNode = Market.loadSceneKitNode(from: .main) else {
-            return container
-        }
-        marketNode.position = SCNVector3Zero
-        container.addChildNode(marketNode)
-        var (minB, maxB) = container.boundingBox
-        let dx = max(CGFloat(maxB.x - minB.x), 0.1)
-        let dz = max(CGFloat(maxB.z - minB.z), 0.1)
-        let marketCellSize: CGFloat = 3
-        let scaleX = (marketCellSize * cellSizeW) / dx
-        let scaleZ = (marketCellSize * cellSizeH) / dz
-        let scaleY = min(scaleX, scaleZ)
-        marketNode.scale = SCNVector3(scaleX, scaleY, scaleZ)
-        applyTransparencyRecursive(0.6, to: container)
-        return container
-    }
-
-    /// Ghost 3D mlina – skaliran na 3×3 ćelije, poluproziran (zelena pri pomicanju).
-    private func makeGhostWindmillNode() -> SCNNode {
-        let container = SCNNode()
-        guard let windmillNode = Windmill.loadSceneKitNode(from: .main) else {
-            return container
-        }
-        windmillNode.position = SCNVector3Zero
-        container.addChildNode(windmillNode)
-        var (minB, maxB) = container.boundingBox
-        let dx = max(CGFloat(maxB.x - minB.x), 0.1)
-        let dz = max(CGFloat(maxB.z - minB.z), 0.1)
-        let windmillCellSize: CGFloat = 3
-        let scaleX = (windmillCellSize * cellSizeW) / dx
-        let scaleZ = (windmillCellSize * cellSizeH) / dz
-        let scaleY = min(scaleX, scaleZ)
-        windmillNode.scale = SCNVector3(scaleX, scaleY, scaleZ)
-        applyTransparencyRecursive(0.6, to: container)
-        return container
-    }
-
-    /// Ghost za Pekaru – 2×2 box (nema 3D modela); zelena boja se aplicira u onMouseMove.
-    private func makeGhostBakeryNode() -> SCNNode {
-        makeGhostFarmObjNode(cellW: 2, cellH: 2)
-    }
-
-    /// Ghost box za farm objekte (npr. Chicken/Corn fallback kad model nije učitan).
+    /// Ghost box za objekte kad 3D model nije učitan (fallback u makeTemplateAndGhost).
     private func makeGhostFarmObjNode(cellW: Int, cellH: Int) -> SCNNode {
         let w = CGFloat(cellW) * cellSizeW
         let h = CGFloat(cellH) * cellSizeH

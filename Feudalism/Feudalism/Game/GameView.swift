@@ -217,7 +217,10 @@ struct GameView: NSViewRepresentable {
         }
         scene.placements = gameState.gameMap.placements
         scene.onLevelReady = { [gameState] in
-            DispatchQueue.main.async { gameState.isLevelReady = true }
+            DispatchQueue.main.async {
+                gameState.levelLoadingMessage = nil
+                gameState.isLevelReady = true
+            }
         }
         view.presentScene(scene)
         container.tiltAngle = gameState.mapCameraSettings.tiltAngle

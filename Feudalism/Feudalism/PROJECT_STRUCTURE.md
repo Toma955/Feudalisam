@@ -5,8 +5,11 @@
 - **AppDelegate.swift** – fullscreen, crna pozadina pri pokretanju
 
 ## Prikaz mape (3D vizualizacija)
-- **Game/GameView.swift** – NSViewRepresentable, SKView, 3D tilt, overlay stupova, zoom/pan callbacki
-- **Game/GameScene.swift** – SpriteKit scena: teren, mreža, kamera, stupovi (callback u view koord.)
+- **Game/SceneKitMapView.swift** – SceneKit prikaz mape (teren, grid, placements, kamera). Ako je u GameState postavljen `currentLevelName`, učitava se **Level.scn**; inače proceduralni teren.
+- **Game/SceneKitLevelLoader.swift** – učitavanje .scn levela (vizualni layout). Level = .scn; gameplay objekti se spawnaju iz GameMap u kodu.
+- **Game/MAPS_README.md** – format mape (.scn), obavezan node `terrain`, koordinatni sustav 4000×4000.
+- **Game/GameView.swift** – NSViewRepresentable, SKView (legacy/alternativa)
+- **Game/GameScene.swift** – SpriteKit scena (legacy)
 - **Core/MapCameraSettings.swift** – zoom, tilt, panOffset, mapRotation, panSpeed
 
 ## Glavni ekrani (SwiftUI)

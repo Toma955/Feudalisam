@@ -30,7 +30,7 @@ struct MapEditorView: View {
                 )
                 .ignoresSafeArea()
             },
-            loadingMessage: gameState.isLevelReady ? nil : "Učitavanje mape…",
+            loadingMessage: gameState.isLevelReady ? nil : (gameState.levelLoadingMessage ?? "Učitavanje mape…"),
             customOverlay: {
                 ZStack(alignment: .bottomLeading) {
                     if let status = gameState.wallTextureStatus {

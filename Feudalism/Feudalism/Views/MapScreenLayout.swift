@@ -59,6 +59,11 @@ struct LevelLoadingOverlay: View {
                 Text(message)
                     .font(.title2.weight(.medium))
                     .foregroundStyle(.white)
+                if message.contains("Generiranje") {
+                    Text("Spremano za sljedeći put.")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.85))
+                }
             }
             .padding(.top, 80)
         }

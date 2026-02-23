@@ -10,20 +10,19 @@ import AppKit
 
 private let titleFull = "Feudalism"
 private let bigTitleFontSize: CGFloat = 140
-private let mainMenuTitleFontSize: CGFloat = 44
-/// Sporija animacija: slovo po slovo i prijelaz.
+/// Sporija animacija: slovo po slovo tijekom učitavanja.
 private let letterInterval: TimeInterval = 0.22
-private let holdAfterLetters: TimeInterval = 1.0
-private let transitionDuration: TimeInterval = 1.4
 
 struct IntroView: View {
     @EnvironmentObject private var gameState: GameState
+    @EnvironmentObject private var assetLoader: GameAssetLoader
     var onComplete: () -> Void
 
     @State private var visibleLetterCount: Int = 0
     @State private var bigTitleScale: CGFloat = 1
     @State private var bigTitleOpacity: Double = 1
     @State private var menuOpacity: Double = 0
+    @State private var didComplete: Bool = false
 
     private var visibleTitle: String {
         let n = min(visibleLetterCount, titleFull.count)
@@ -54,15 +53,37 @@ struct IntroView: View {
             .padding(40)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(56)
+
+            if !assetLoader.isLoaded {
+                VStack(spacing: 8) {
+                    ProgressView(value: assetLoader.loadProgress)
+                        .tint(.white)
+                        .frame(maxWidth: 280)
+                    Text(assetLoader.loadStatus.isEmpty ? "Učitavanje…" : assetLoader.loadStatus)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.9))
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, 48)
+            }
         }
         .onAppear { startSequence() }
+        .onChange(of: assetLoader.isLoaded) { _, loaded in
+            if loaded, !didComplete {
+                didComplete = true
+                onComplete()
+            }
+        }
     }
 
+    /// Animacija naslova tijekom učitavanja; izbornik se prikaže tek kad je učitavanje 100% (onChange(isLoaded)).
     private func startSequence() {
         let volume = gameState.audioMusicVolume
         AudioManager.shared.playIntroSoundtrackIfAvailable(volume: volume)
 
-        SceneKitMapView.preloadGameAssets()
+        Task { await assetLoader.loadAllIfNeeded() }
 
         for i in 1...titleFull.count {
             DispatchQueue.main.asyncAfter(deadline: .now() + letterInterval * Double(i)) {
@@ -71,23 +92,12 @@ struct IntroView: View {
                 }
             }
         }
-
-        let lettersEnd = letterInterval * Double(titleFull.count) + holdAfterLetters
-        DispatchQueue.main.asyncAfter(deadline: .now() + lettersEnd) {
-            withAnimation(.easeInOut(duration: transitionDuration)) {
-                bigTitleScale = mainMenuTitleFontSize / bigTitleFontSize
-                bigTitleOpacity = 0
-                menuOpacity = 1
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + transitionDuration) {
-                onComplete()
-            }
-        }
     }
 }
 
 #Preview {
     IntroView(onComplete: {})
         .environmentObject(GameState())
+        .environmentObject(GameAssetLoader.shared)
         .frame(width: 800, height: 600)
 }

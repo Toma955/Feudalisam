@@ -97,6 +97,9 @@ final class GameState: ObservableObject {
     /// false dok se level (mapa, teren) ne učita; tek onda se prikaže igra (bez overlay-a).
     @Published var isLevelReady: Bool = false
 
+    /// Poruka tijekom učitavanja mape (npr. "Učitavanje mape (200×200)…", "Generiranje mape (200×200)…"). Nil kad je level spreman.
+    @Published var levelLoadingMessage: String?
+
     /// Krajevi (kraljevstva) na mapi – jedan ili više. Jedan = solo, više = last standing.
     @Published var realms: [Realm] = []
     /// Grupe (savezi) – realmi s istim groupId dijele pobjedu.
@@ -127,6 +130,9 @@ final class GameState: ObservableObject {
 
     /// Mapa mape – grid u 1×1 jedinicama (100×100, 200×200 ili 1000×1000).
     @Published var gameMap: GameMap
+
+    /// Ime levela za učitavanje iz .scn (bez ekstenzije). Npr. "Level" ili "Maps/Level". Nil = proceduralni teren.
+    @Published var currentLevelName: String?
 
     /// Povećava se pri svakom place/remove da SwiftUI sigurno ažurira prikaz mape.
     @Published private(set) var placementsVersion: Int = 0
@@ -222,6 +228,7 @@ final class GameState: ObservableObject {
         self.audioMusicVolume = UserDefaults.standard.object(forKey: Self.audioMusicVolumeKey) as? Double ?? 0.6
         self.audioSoundsVolume = UserDefaults.standard.object(forKey: Self.audioSoundsVolumeKey) as? Double ?? 0.8
         self.audioSpeechVolume = UserDefaults.standard.object(forKey: Self.audioSpeechVolumeKey) as? Double ?? 0.8
+        self.currentLevelName = "Level"  // učitaj Level.scn ako postoji; inače proceduralni teren
     }
 
     // MARK: - Način igre
@@ -337,13 +344,14 @@ final class GameState: ObservableObject {
         objectWillChange.send()
     }
 
-    /// Otvori Map Editor – prazna mapa 100×100.
+    /// Otvori Map Editor – prazna mapa prema trenutnoj veličini.
     func openMapEditor() {
         setMapSize(.size200)
         selectedPlacementObjectId = nil
         isShowingMainMenu = false
         isMapEditorMode = true
         isLevelReady = false
+        levelLoadingMessage = "Učitavanje mape (\(gameMap.rows)×\(gameMap.cols))…"
     }
 
     /// Zatvori Map Editor i vrati se na izbornik.
@@ -395,6 +403,7 @@ final class GameState: ObservableObject {
     /// Pokreni novu igru – skriva izbornik, prikazuje karticu. Resursi se u solo modu animiraju 0→100 kad se level učita.
     func startNewGame() {
         isLevelReady = false
+        levelLoadingMessage = "Učitavanje mape (\(gameMap.rows)×\(gameMap.cols))…"
         isShowingMainMenu = false
         hasRunSoloResourceAnimation = false
         if isSoloMode {

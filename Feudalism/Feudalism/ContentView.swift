@@ -294,7 +294,7 @@ struct ContentView: View {
                 )
                 .onPreferenceChange(ContentAreaWidthKey.self) { contentAreaWidth = $0 }
             },
-            loadingMessage: gameState.isLevelReady ? nil : "Učitavanje levela…",
+            loadingMessage: gameState.isLevelReady ? nil : (gameState.levelLoadingMessage ?? "Učitavanje levela…"),
             customOverlay: {
                 Group {
                     if showMinijatureWall {
@@ -541,6 +541,18 @@ struct ContentView: View {
 
     private var gameHUD: some View {
         MapScreenHUDBar {
+            Button {
+                gameState.showMainMenu()
+            } label: {
+                Label("Nazad", systemImage: "chevron.backward")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.95))
+            }
+            .buttonStyle(.plain)
+            .help("Nazad na izbornik")
+
+            HUDBarDivider()
+
             // Mapa – veća ikona gumb, bez sive kutije
             Button {
                 // Akcija – npr. pregled mape / fullscreen
