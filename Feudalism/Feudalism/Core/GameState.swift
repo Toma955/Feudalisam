@@ -20,12 +20,14 @@ enum InputDevice: String, CaseIterable {
     }
 }
 
-/// Jezik sučelja – priprema za lokalizaciju (hr, en, de, fr).
+/// Jezik sučelja – lokalizacija preko Locales mape (hr, en, de, fr, it, es).
 enum AppLanguage: String, CaseIterable, Identifiable {
     case croatian = "hr"
     case english = "en"
     case german = "de"
     case french = "fr"
+    case italian = "it"
+    case spanish = "es"
 
     var id: String { rawValue }
 
@@ -35,10 +37,12 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         case .english: return "English"
         case .german: return "Deutsch"
         case .french: return "Français"
+        case .italian: return "Italiano"
+        case .spanish: return "Español"
         }
     }
 
-    /// Lokalni identifikator za Bundle/NSLocalizedString (npr. "hr", "en").
+    /// Lokalni identifikator za učitavanje iz Locales/{rawValue}/.
     var localeIdentifier: String { rawValue }
 }
 
@@ -139,6 +143,7 @@ final class GameState: ObservableObject {
     private static let playerProfileNameKey = "Feudalism.playerProfileName"
     private static let playerEmblemIdKey = "Feudalism.playerEmblemId"
     private static let showStartupAnimationKey = "Feudalism.showStartupAnimation"
+    private static let showBottomBarLabelsKey = "Feudalism.showBottomBarLabels"
     private static let audioMusicVolumeKey = "Feudalism.audioMusicVolume"
     private static let audioSoundsVolumeKey = "Feudalism.audioSoundsVolume"
     private static let audioSpeechVolumeKey = "Feudalism.audioSpeechVolume"
@@ -181,6 +186,11 @@ final class GameState: ObservableObject {
         didSet { UserDefaults.standard.set(showStartupAnimation, forKey: Self.showStartupAnimationKey) }
     }
 
+    /// true = prikaži nazive ispod ikona u donjem izborniku (solo). Postavke → General.
+    @Published var showBottomBarLabels: Bool {
+        didSet { UserDefaults.standard.set(showBottomBarLabels, forKey: Self.showBottomBarLabelsKey) }
+    }
+
     init(mapSize: MapSizePreset = .small) {
         self.gameMap = mapSize.makeGameMap()
         let raw = UserDefaults.standard.string(forKey: Self.inputDeviceKey) ?? InputDevice.trackpad.rawValue
@@ -191,6 +201,7 @@ final class GameState: ObservableObject {
         let emblemRaw = UserDefaults.standard.string(forKey: Self.playerEmblemIdKey) ?? PlayerEmblem.shield.rawValue
         self.playerEmblemId = PlayerEmblem(rawValue: emblemRaw)?.rawValue ?? PlayerEmblem.shield.rawValue
         self.showStartupAnimation = UserDefaults.standard.object(forKey: Self.showStartupAnimationKey) as? Bool ?? true
+        self.showBottomBarLabels = UserDefaults.standard.object(forKey: Self.showBottomBarLabelsKey) as? Bool ?? true
         self.audioMusicVolume = UserDefaults.standard.object(forKey: Self.audioMusicVolumeKey) as? Double ?? 0.6
         self.audioSoundsVolume = UserDefaults.standard.object(forKey: Self.audioSoundsVolumeKey) as? Double ?? 0.8
         self.audioSpeechVolume = UserDefaults.standard.object(forKey: Self.audioSpeechVolumeKey) as? Double ?? 0.8

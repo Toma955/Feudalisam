@@ -19,38 +19,34 @@ struct MapEditorView: View {
     @State private var textureStatusMessage = ""
 
     var body: some View {
-        ZStack {
-            Color.white.ignoresSafeArea()
-
-            SceneKitMapView(
-                showGrid: showGrid,
-                handPanMode: $handPanMode,
-                isEraseMode: eraseMode,
-                onRemoveAt: eraseMode ? { gameState.removePlacement(at: MapCoordinate(row: $0, col: $1)) } : nil
-            )
-            .ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                editorToolbar
-                Spacer()
+        MapScreenLayout(
+            topBar: { editorToolbar },
+            content: {
+                SceneKitMapView(
+                    showGrid: showGrid,
+                    handPanMode: $handPanMode,
+                    isEraseMode: eraseMode,
+                    onRemoveAt: eraseMode ? { gameState.removePlacement(at: MapCoordinate(row: $0, col: $1)) } : nil
+                )
+                .ignoresSafeArea()
+            },
+            loadingMessage: gameState.isLevelReady ? nil : "Učitavanje mape…",
+            customOverlay: {
+                ZStack(alignment: .bottomLeading) {
+                    if let status = gameState.wallTextureStatus {
+                        Text(status)
+                            .font(.caption.monospaced())
+                            .padding(8)
+                            .background(.black.opacity(0.7))
+                            .foregroundStyle(status.contains("Uspješno") || status.hasSuffix("OK") ? .green : .orange)
+                            .cornerRadius(6)
+                            .padding(12)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .allowsHitTesting(false)
             }
-        }
-        .overlay {
-            if !gameState.isLevelReady {
-                levelLoadingOverlay
-            }
-        }
-        .overlay(alignment: .bottomLeading) {
-            if let status = gameState.wallTextureStatus {
-                Text(status)
-                    .font(.caption.monospaced())
-                    .padding(8)
-                    .background(.black.opacity(0.7))
-                    .foregroundStyle(status.contains("Uspješno") || status.hasSuffix("OK") ? .green : .orange)
-                    .cornerRadius(6)
-                    .padding(12)
-            }
-        }
+        )
         .onAppear {
             let (ok, message) = Wall.checkAndLogTextureStatus(bundle: .main)
             let status = ok ? "Tekstura zida je uspješno učitana i primijenjena." : "Tekstura zida nije učitana: \(message)"
@@ -70,77 +66,79 @@ struct MapEditorView: View {
         }
     }
 
-    private var levelLoadingOverlay: some View {
-        ZStack {
-            Color.black.opacity(0.85).ignoresSafeArea()
-            VStack(spacing: 16) {
-                ProgressView().scaleEffect(1.4).tint(.white)
-                Text("Učitavanje mape…")
-                    .font(.title2.weight(.medium))
-                    .foregroundStyle(.white)
-            }
-        }
-        .allowsHitTesting(true)
-    }
-
     private var editorToolbar: some View {
-        HStack(spacing: 12) {
+        MapScreenHUDBar {
+            // Isti kompas i zoom kao u solo modu (kamera)
+            CompassCubeView(
+                mapRotation: Binding(
+                    get: { gameState.mapCameraSettings.mapRotation },
+                    set: { new in
+                        var s = gameState.mapCameraSettings
+                        s.mapRotation = new
+                        gameState.mapCameraSettings = s
+                    }
+                ),
+                panOffset: Binding(
+                    get: { gameState.mapCameraSettings.panOffset },
+                    set: { new in
+                        var s = gameState.mapCameraSettings
+                        s.panOffset = new
+                        gameState.mapCameraSettings = s
+                    }
+                )
+            )
+            ZoomPhaseView(mapCameraSettings: Binding(
+                get: { gameState.mapCameraSettings },
+                set: { gameState.mapCameraSettings = $0 }
+            ))
+
+            HUDBarDivider()
+
             Button {
                 gameState.closeMapEditor()
             } label: {
-                Label("Nazad", systemImage: "chevron.left")
-                    .font(.system(size: 13, weight: .medium))
+                Label("Nazad", systemImage: "chevron.backward")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.95))
             }
-            .buttonStyle(.bordered)
-            .tint(.white.opacity(0.9))
+            .buttonStyle(.plain)
 
-            Rectangle()
-                .fill(.white.opacity(0.3))
-                .frame(width: 1, height: 24)
+            HUDBarDivider()
 
             Text("Objekt:")
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.8))
+                .foregroundStyle(.white.opacity(0.85))
 
             Button {
                 eraseMode = false
                 gameState.selectedPlacementObjectId = Wall.objectId
             } label: {
                 Text("Zid")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(gameState.selectedPlacementObjectId == Wall.objectId && !eraseMode ? .yellow : .white.opacity(0.9))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(gameState.selectedPlacementObjectId == Wall.objectId && !eraseMode ? .yellow : .white.opacity(0.9))
             }
-            .buttonStyle(.bordered)
-            .tint(.white.opacity(0.2))
-
-            Rectangle()
-                .fill(.white.opacity(0.3))
-                .frame(width: 1, height: 24)
+            .buttonStyle(.plain)
 
             Button {
                 eraseMode.toggle()
                 if eraseMode { gameState.selectedPlacementObjectId = nil }
             } label: {
                 Label("Briši", systemImage: "eraser.fill")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(eraseMode ? .yellow : .white.opacity(0.9))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(eraseMode ? .yellow : .white.opacity(0.9))
             }
-            .buttonStyle(.bordered)
-            .tint(eraseMode ? .yellow.opacity(0.2) : .white.opacity(0.2))
+            .buttonStyle(.plain)
 
-            Rectangle()
-                .fill(.white.opacity(0.3))
-                .frame(width: 1, height: 24)
+            HUDBarDivider()
 
             Button {
                 gameState.clearEditorMap()
             } label: {
                 Label("Očisti mapu", systemImage: "trash")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.9))
             }
-            .buttonStyle(.bordered)
-            .tint(.white.opacity(0.2))
-            .foregroundStyle(.white.opacity(0.9))
+            .buttonStyle(.plain)
 
             Button {
                 if gameState.saveEditorMap() {
@@ -151,11 +149,10 @@ struct MapEditorView: View {
                 showSaveLoadAlert = true
             } label: {
                 Label("Spremi", systemImage: "square.and.arrow.down")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.9))
             }
-            .buttonStyle(.bordered)
-            .tint(.white.opacity(0.2))
-            .foregroundStyle(.white.opacity(0.9))
+            .buttonStyle(.plain)
 
             Button {
                 if gameState.loadEditorMap() {
@@ -166,28 +163,23 @@ struct MapEditorView: View {
                 showSaveLoadAlert = true
             } label: {
                 Label("Učitaj", systemImage: "square.and.arrow.up")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.9))
             }
-            .buttonStyle(.bordered)
-            .tint(.white.opacity(0.2))
-            .foregroundStyle(.white.opacity(0.9))
+            .buttonStyle(.plain)
 
             Spacer(minLength: 0)
+
+            HUDBarDivider()
 
             Toggle(isOn: $showGrid) {
                 Text("Ćelije")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.8))
+                    .foregroundStyle(.white.opacity(0.85))
             }
             .toggleStyle(.switch)
-            .scaleEffect(0.8)
+            .scaleEffect(0.82)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.2), lineWidth: 1))
-        .padding(.horizontal, 24)
-        .padding(.top, 12)
     }
 }
 

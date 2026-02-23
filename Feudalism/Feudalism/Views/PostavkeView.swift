@@ -58,7 +58,7 @@ struct PostavkeView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                Text("Hrvatski, engleski, njemački, francuski. Lokalizacija teksta u izradi.")
+                Text("Tekstovi se uređuju u mapi Locales (hr, en, de, fr, it, es) u datotekama strings.json.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: { Text("Jezik") }
@@ -68,6 +68,12 @@ struct PostavkeView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: { Text("Pri pokretanju") }
+            Section {
+                Toggle("Nazivi u donjem izborniku", isOn: $gameState.showBottomBarLabels)
+                Text("Kad je uključeno, ispod ikona (Dvor, Farma, …) u donjem izborniku prikazuju se nazivi.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: { Text("Donji izbornik (solo)") }
             Section {
                 Picker("Ulazni uređaj", selection: $gameState.inputDevice) {
                     ForEach(InputDevice.allCases, id: \.self) { device in
@@ -250,7 +256,7 @@ struct PostavkeSectionContent: View {
                     }
                 }
                 .pickerStyle(.menu)
-                Text("Hrvatski, engleski, njemački, francuski. Lokalizacija teksta u izradi.")
+                Text("Tekstovi se uređuju u mapi Locales (hr, en, de, fr, it, es) u datotekama strings.json.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: { Text("Jezik") }
@@ -260,6 +266,12 @@ struct PostavkeSectionContent: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: { Text("Pri pokretanju") }
+            Section {
+                Toggle("Nazivi u donjem izborniku", isOn: $gameState.showBottomBarLabels)
+                Text("Kad je uključeno, ispod ikona (Dvor, Farma, …) u donjem izborniku prikazuju se nazivi.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: { Text("Donji izbornik (solo)") }
             Section {
                 Picker("Ulazni uređaj", selection: $gameState.inputDevice) {
                     ForEach(InputDevice.allCases, id: \.self) { device in

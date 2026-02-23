@@ -61,18 +61,6 @@ private func printIconDiagnostics() {
     // Bez ispisa u produkciji
 }
 
-/// Učita NSImage za ikonu: prvo iz Assets.xcassets, pa iz mape Icons/icons u bundleu.
-private func loadBarIcon(named name: String) -> NSImage? {
-    if let img = NSImage(named: name) { return img }
-    let subdirs = ["Icons", "icons", "Feudalism/Icons", "Feudalism/icons"]
-    for sub in subdirs {
-        if let url = Bundle.main.url(forResource: name, withExtension: "png", subdirectory: sub) {
-            return NSImage(contentsOf: url)
-        }
-    }
-    return nil
-}
-
 /// Učita ikonu resursa. Slike su već s transparentnom pozadinom – prikazujemo ih izravno.
 private func loadResourceIcon(named name: String) -> NSImage? {
     loadBarIcon(named: name)
@@ -112,28 +100,6 @@ private struct ResourceRow: View {
         .frame(width: ResourceRow.fixedWidth(iconSize: iconSize))
     }
     static func fixedWidth(iconSize: CGFloat) -> CGFloat { iconSize + 4 + resourceDigitWidth }
-}
-
-/// Ikona s asseta ili iz mape Icons; inače SF Symbol. Nazivi: farm, food, castle, sword.
-private struct BarIcon: View {
-    let assetName: String
-    let systemName: String
-    private var image: NSImage? { loadBarIcon(named: assetName) }
-    private var hasAsset: Bool { image != nil }
-    var body: some View {
-        Group {
-            if let nsImage = image {
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .scaledToFit()
-            } else {
-                Image(systemName: systemName)
-                    .font(.system(size: 28))
-            }
-        }
-        .frame(width: 48, height: 48)
-        .foregroundStyle(.white.opacity(0.95))
-    }
 }
 
 /// Što prikazuje traka resursa: Resources = novci (zlato), drvo, kamen, željezo; Food = kruh, hmelj, žito.
@@ -198,14 +164,26 @@ private enum BottomBarCategory: String, CaseIterable {
     case castle
     case sword
     case mine
+    case cave
     case farm
     case food
+    case tools
 }
+
+/// Širina područja sadržaja (za ograničavanje max širine donjeg bara).
+private struct ContentAreaWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 830
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+/// Minimalna širina donjeg bara = širina trenutnog rasporeda (7 ikona + padding). Dimenzije se ne smiju sužavati.
+private let bottomBarMinWidth: CGFloat = 620
 
 struct ContentView: View {
     @EnvironmentObject private var gameState: GameState
     @State private var showMinijatureWall = false
     @State private var expandedBottomCategory: BottomBarCategory? = nil
+    @State private var contentAreaWidth: CGFloat = 830
     @State private var showGrid = true
     @State private var handPanMode = false
     @State private var showPivotIndicator = false
@@ -217,59 +195,63 @@ struct ContentView: View {
     @State private var hudScoreMax: Int = 0
 
     var body: some View {
-        ZStack {
-            // Pozadina
-            Color.white.ignoresSafeArea()
+        MapScreenLayout(
+            topBar: { gameHUD },
+            content: {
+                ZStack {
+                    SceneKitMapView(showGrid: showGrid, handPanMode: $handPanMode, showPivotIndicator: showPivotIndicator)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .ignoresSafeArea()
 
-            // Puni zaslon – 3D mapa (SceneKit): teren, rešetka, kamera s nagibom, zoom, pan
-            SceneKitMapView(showGrid: showGrid, handPanMode: $handPanMode, showPivotIndicator: showPivotIndicator)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .ignoresSafeArea()
-
-            // Dno: island – 5 ikona ili prošireni sivi element s pod-ikonama (npr. zid za castle)
-            VStack {
-                Spacer()
-                bottomBarContent
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 14)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
-                    .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.25), lineWidth: 1))
-                    .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 4)
-                    .padding(.bottom, 24)
-                    .animation(.easeInOut(duration: 0.28), value: expandedBottomCategory)
+                    VStack {
+                        Spacer()
+                        Group {
+                            if expandedBottomCategory != nil {
+                                HStack(spacing: 0) {
+                                    Spacer(minLength: 0)
+                                    bottomBarContent
+                                        .padding(.horizontal, 20)
+                                        .padding(.vertical, 12)
+                                        .frame(maxHeight: 96)
+                                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+                                        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.25), lineWidth: 1))
+                                        .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 4)
+                                        .frame(
+                                            minWidth: bottomBarMinWidth,
+                                            maxWidth: min(830, contentAreaWidth * 0.92)
+                                        )
+                                    Spacer(minLength: 0)
+                                }
+                            } else {
+                                bottomBarContent
+                                    .padding(.horizontal, 28)
+                                    .padding(.vertical, 14)
+                                    .frame(minWidth: bottomBarMinWidth)
+                                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+                                    .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.25), lineWidth: 1))
+                                    .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 4)
+                            }
+                        }
+                        .padding(.bottom, 20)
+                        .animation(.easeInOut(duration: 0.28), value: expandedBottomCategory)
+                    }
+                }
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(key: ContentAreaWidthKey.self, value: geo.size.width)
+                    }
+                )
+                .onPreferenceChange(ContentAreaWidthKey.self) { contentAreaWidth = $0 }
+            },
+            loadingMessage: gameState.isLevelReady ? nil : "Učitavanje levela…",
+            customOverlay: {
+                Group {
+                    if showMinijatureWall {
+                        minijatureWallOverlay
+                    }
+                }
             }
-
-            // HUD – jedna traka gore: Kamera | Postavljanje | Resursi | Izlaz
-            VStack(spacing: 0) {
-                gameHUD
-                Spacer()
-            }
-
-            // Mali prozor sa strane: ispis zooma (2×, 14×, …) – izvan sive trake
-            HStack {
-                Spacer()
-                Text("\(Int(round(gameState.mapCameraSettings.currentZoom)))×")
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 6))
-                    .padding(.trailing, 24)
-                    .padding(.top, 72)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .allowsHitTesting(false)
-        }
-        .overlay {
-            if showMinijatureWall {
-                minijatureWallOverlay
-            }
-        }
-        .overlay {
-            if !gameState.isLevelReady {
-                levelLoadingOverlay
-            }
-        }
+        )
         .onChange(of: gameState.isLevelReady) { ready in
             if ready {
                 AudioManager.shared.playMapMusicIfAvailable(volume: gameState.audioMusicVolume)
@@ -301,35 +283,64 @@ struct ContentView: View {
     }
 
     private func barIcon(for category: BottomBarCategory) -> some View {
-        switch category {
-        case .castle: return BarIcon(assetName: "castle", systemName: "building.columns.fill")
-        case .sword: return BarIcon(assetName: "sword", systemName: "crossed.swords")
-        case .mine: return BarIcon(assetName: "mine", systemName: "hammer.fill")
-        case .farm: return BarIcon(assetName: "farm", systemName: "leaf.fill")
-        case .food: return BarIcon(assetName: "food", systemName: "fork.knife")
+        let icon: BarIconView = {
+            switch category {
+            case .castle: return BarIconView(assetName: "castle", systemName: "building.columns.fill")
+            case .sword: return BarIconView(assetName: "sword", systemName: "crossed.swords")
+            case .mine: return BarIconView(assetName: "mine", systemName: "hammer.fill")
+            case .cave: return BarIconView(assetName: "cave", systemName: "mountain.2.fill")
+            case .farm: return BarIconView(assetName: "farm", systemName: "leaf.fill")
+            case .food: return BarIconView(assetName: "food", systemName: "fork.knife")
+            case .tools: return BarIconView(assetName: "tools", systemName: "wrench.and.screwdriver.fill")
+            }
+        }()
+        return VStack(spacing: 2) {
+            icon
+            if gameState.showBottomBarLabels {
+                Text(titleForCategory(category))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
         }
     }
 
-    /// Prošireni island: ikone + strelica za povratak (bez naslova i bez natpisa).
+    /// Prošireni island: povećan, centriran, natpisi ispod ikona, lagano odvojeni.
     private func expandedBottomBar(category: BottomBarCategory) -> some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 10) {
             switch category {
             case .castle:
+                CastleButtonExpandedView(
+                    onSelectWall: { gameState.selectedPlacementObjectId = Wall.objectId }
+                )
+                .padding(.horizontal, 24)
+                .padding(.vertical, 16)
+            case .farm:
+                FarmButtonExpandedView(
+                    onSelectAppleFarm: { /* objekt – uskoro */ },
+                    onSelectPigFarm: { /* objekt – uskoro */ },
+                    onSelectHayFarm: { /* objekt – uskoro */ },
+                    onSelectCowFarm: { /* objekt – uskoro */ },
+                    onSelectSheepFarm: { /* objekt – uskoro */ },
+                    onSelectWheatFarm: { /* objekt – uskoro */ },
+                    onSelectChickenFarm: { /* objekt – uskoro */ },
+                    onSelectVegetablesFarm: { /* objekt – uskoro */ },
+                    onSelectGrapesFarm: { /* objekt – uskoro */ },
+                    onSelectSpicesFarm: { /* objekt – uskoro */ },
+                    onSelectFlowerFarm: { /* objekt – uskoro */ }
+                )
+            case .tools:
+                ToolsButtonExpandedView(
+                    onSelectSword: { /* označen zeleno – akcija uskoro */ },
+                    onSelectMace: { /* mace.png */ },
+                    onSelectReport: { /* report.png */ },
+                    onSelectShovel: { /* shovel.png */ },
+                    onSelectPen: { /* pen.png */ }
+                )
+            case .sword, .mine, .cave, .food:
                 HStack(spacing: 12) {
-                    Button {
-                        gameState.selectedPlacementObjectId = Wall.objectId
-                        // Izbornik ostaje otvoren – zatvori ga tek kad klikneš Nazad (chevron)
-                    } label: {
-                        VStack(spacing: 2) {
-                            BarIcon(assetName: "wall", systemName: "rectangle.3.group")
-                            Text("Zid").font(.system(size: 10)).foregroundStyle(.white.opacity(0.9))
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-            case .sword, .mine, .farm, .food:
-                HStack(spacing: 12) {
-                    Text("Uskoro").font(.system(size: 10)).foregroundStyle(.white.opacity(0.6))
+                    Text(LocalizedStrings.string(for: "soon", language: gameState.appLanguage))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.6))
                 }
             }
             Button {
@@ -341,74 +352,65 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
         }
-        .frame(width: 356, height: 96)
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private func titleForCategory(_ category: BottomBarCategory) -> String {
+        let key: String
         switch category {
-        case .castle: return "Dvor"
-        case .sword: return "Oružje"
-        case .mine: return "Rudnik"
-        case .farm: return "Farma"
-        case .food: return "Hrana"
+        case .castle: key = "category_castle"
+        case .sword: key = "category_sword"
+        case .mine: key = "category_mine"
+        case .cave: key = "category_cave"
+        case .farm: key = "category_farm"
+        case .food: key = "category_food"
+        case .tools: key = "category_tools"
         }
-    }
-
-    /// Prekriva ekran dok se level (mapa, teren) učitava; nestaje kad GameScene pozove onLevelReady.
-    private var levelLoadingOverlay: some View {
-        ZStack {
-            Color.black.opacity(0.85)
-                .ignoresSafeArea()
-            VStack(spacing: 16) {
-                ProgressView()
-                    .scaleEffect(1.4)
-                    .tint(.white)
-                Text("Učitavanje levela…")
-                    .font(.title2.weight(.medium))
-                    .foregroundStyle(.white)
-            }
-            .padding(.top, 80)
-        }
-        .allowsHitTesting(true)
+        return LocalizedStrings.string(for: key, language: gameState.appLanguage)
     }
 
     // MARK: - HUD (UX: Kamera → Postavljanje → Resursi → Izlaz)
 
     private var gameHUD: some View {
-        VStack(spacing: 0) {
-            // Kompaktna zaobljena traka – ne od ruba do ruba
-            HStack {
-                Spacer(minLength: 0)
-                HStack(spacing: 16) {
-                    // Kompas (rotacija 90°)
-                    CompassCubeView(
-                        mapRotation: Binding(
-                            get: { gameState.mapCameraSettings.mapRotation },
-                            set: { new in
-                                var s = gameState.mapCameraSettings
-                                s.mapRotation = new
-                                gameState.mapCameraSettings = s
-                            }
-                        ),
-                        panOffset: Binding(
-                            get: { gameState.mapCameraSettings.panOffset },
-                            set: { new in
-                                var s = gameState.mapCameraSettings
-                                s.panOffset = new
-                                gameState.mapCameraSettings = s
-                            }
-                        )
-                    )
+        MapScreenHUDBar {
+            // Mapa – gumb lijevo od kompasa (map.png)
+            Button {
+                // Akcija – npr. pregled mape / fullscreen
+            } label: {
+                hudIconImage("map", fallback: "map", size: 26)
+            }
+            .buttonStyle(.plain)
+            .help("Mapa")
 
-                    // Zoom – 3 faze (šuma 2×, 3 stabla 8×, 1 stablo 14×)
-                    ZoomPhaseView(mapCameraSettings: Binding(
-                        get: { gameState.mapCameraSettings },
-                        set: { gameState.mapCameraSettings = $0 }
-                    ))
+            // Kompas (rotacija 90°)
+            CompassCubeView(
+                mapRotation: Binding(
+                    get: { gameState.mapCameraSettings.mapRotation },
+                    set: { new in
+                        var s = gameState.mapCameraSettings
+                        s.mapRotation = new
+                        gameState.mapCameraSettings = s
+                    }
+                ),
+                panOffset: Binding(
+                    get: { gameState.mapCameraSettings.panOffset },
+                    set: { new in
+                        var s = gameState.mapCameraSettings
+                        s.panOffset = new
+                        gameState.mapCameraSettings = s
+                    }
+                )
+            )
 
-                    hudDivider
+            // Zoom – 3 faze (šuma 2×, 3 stabla 8×, 1 stablo 14×)
+            ZoomPhaseView(mapCameraSettings: Binding(
+                get: { gameState.mapCameraSettings },
+                set: { gameState.mapCameraSettings = $0 }
+            ))
 
-                    // Gear (manje), Foodbottun, Weapons, Resources (veće)
+            HUDBarDivider()
+
+            // Gear (manje), Foodbottun, Weapons, Resources (veće)
                     HStack(spacing: 10) {
                         Button {
                             showSettingsPopover.toggle()
@@ -428,12 +430,12 @@ struct ContentView: View {
                         .buttonStyle(.plain)
                     }
 
-                    hudDivider
+                    HUDBarDivider()
 
                     // 0/0 i postotak (tamnocrveno kad 0/0); max 999/999; linija između; boja po postotku
                     HUDScoreView(current: hudScoreCurrent, max: hudScoreMax)
 
-                    hudDivider
+                    HUDBarDivider()
 
                     // Resursi: novci (zlato), drvo, kamen, željezo; Food = kruh, hmelj, žito. Fiksna širina da se sivi element ne mijenja.
                     HStack(spacing: 12) {
@@ -445,6 +447,7 @@ struct ContentView: View {
                         } else {
                             ResourceRow(iconName: "bread", value: gameState.food)
                             ResourceRow(iconName: "hop", value: gameState.hop)
+                                .help(LocalizedStrings.string(for: "resource_hop", language: gameState.appLanguage))
                             ResourceRow(iconName: "hay", value: gameState.hay)
                         }
                     }
@@ -455,16 +458,6 @@ struct ContentView: View {
                         removal: .opacity.animation(.easeIn(duration: 0.18)).combined(with: .scale(scale: 0.96))
                     ))
                     .animation(.easeInOut(duration: 0.25), value: resourceStripMode)
-                }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 0)
-                .frame(minWidth: 1380, maxWidth: 1380, minHeight: 52, maxHeight: 52)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
-                .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 1)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
         }
     }
 
@@ -535,12 +528,6 @@ struct ContentView: View {
         }
         .frame(width: size, height: size)
         .foregroundStyle(.white.opacity(0.9))
-    }
-
-    private var hudDivider: some View {
-        Rectangle()
-            .fill(.white.opacity(0.2))
-            .frame(width: 1, height: 6)
     }
 
     /// Minijaturni prikaz zida – otvara se klikom na ikonu dvora u sredini.
