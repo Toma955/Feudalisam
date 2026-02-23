@@ -19,6 +19,8 @@ struct WallBarButtonView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.white.opacity(0.9))
             }
+            .frame(minWidth: 60, minHeight: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

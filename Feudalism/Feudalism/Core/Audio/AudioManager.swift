@@ -124,11 +124,26 @@ final class AudioManager: ObservableObject {
 
     // MARK: - Zvukovi
 
-    /// Reproduciraj zvuk iz bundlea (npr. "place_wall", "click"). volume 0...1; ako nije proslijeđen, koristi 0.8.
+    /// Podmape u bundleu u kojima tražiti zvuk (npr. place.wav u Audio ili Core/Audio).
+    private static let soundSubdirectories = ["Audio", "Core/Audio", "Feudalism/Core/Audio", nil as String?]
+
+    /// Reproduciraj zvuk iz bundlea (npr. "place" → place.wav u folderu Audio). volume 0...1; ako nije proslijeđen, koristi 0.8.
     func playSound(named name: String, volume: Double = 0.8) {
-        guard let url = Bundle.main.url(forResource: name, withExtension: "wav")
-            ?? Bundle.main.url(forResource: name, withExtension: "mp3")
-            ?? Bundle.main.url(forResource: name, withExtension: "m4a") else { return }
+        let bundle = Bundle.main
+        let exts = ["wav", "mp3", "m4a"]
+        var url: URL?
+        for sub in Self.soundSubdirectories {
+            for ext in exts {
+                if let u = sub != nil
+                    ? bundle.url(forResource: name, withExtension: ext, subdirectory: sub)
+                    : bundle.url(forResource: name, withExtension: ext) {
+                    url = u
+                    break
+                }
+            }
+            if url != nil { break }
+        }
+        guard let url = url else { return }
         guard volume > 0.01 else { return }
         do {
             let player = try AVAudioPlayer(contentsOf: url)

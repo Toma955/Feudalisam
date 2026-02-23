@@ -61,6 +61,62 @@ private func makeTerrainTexture() -> Any? {
     return skTex
 }
 
+/// Učita sliku za kursor iz Icons ili bundlea po imenu (bez ekstenzije).
+private func loadCursorImage(named name: String) -> NSImage? {
+    if let img = NSImage(named: name) { return img }
+    for sub in ["Icons", "icons", "Feudalism/Icons", "Feudalism/icons", nil] as [String?] {
+        let url: URL? = sub != nil
+            ? Bundle.main.url(forResource: name, withExtension: "png", subdirectory: sub)
+            : Bundle.main.url(forResource: name, withExtension: "png")
+        if let url = url, let img = NSImage(contentsOf: url) { return img }
+    }
+    return nil
+}
+
+/// Veličina kursora u pikselima (ista za mač i buzdovan).
+private let gameCursorSize: CGFloat = 32
+
+/// Crtaj sliku u 32×32 s opcionalnom rotacijom 90° udesno; hot spot u centru.
+private func makeCursorImage(from src: NSImage, rotate90Clockwise: Bool) -> NSCursor {
+    guard src.isValid, src.size.width > 0, src.size.height > 0 else { return .arrow }
+    let srcSize = src.size
+    let scale = min(gameCursorSize / srcSize.width, gameCursorSize / srcSize.height)
+    let scaledW = srcSize.width * scale
+    let scaledH = srcSize.height * scale
+
+    let out = NSImage(size: NSSize(width: gameCursorSize, height: gameCursorSize))
+    out.lockFocus()
+    NSGraphicsContext.current?.imageInterpolation = .high
+    let ctx = NSGraphicsContext.current?.cgContext
+    if rotate90Clockwise {
+        ctx?.translateBy(x: gameCursorSize / 2, y: gameCursorSize / 2)
+        ctx?.rotate(by: .pi / 2)
+        ctx?.translateBy(x: -scaledW / 2, y: -scaledH / 2)
+    } else {
+        ctx?.translateBy(x: (gameCursorSize - scaledW) / 2, y: (gameCursorSize - scaledH) / 2)
+    }
+    src.draw(in: CGRect(x: 0, y: 0, width: scaledW, height: scaledH),
+             from: CGRect(origin: .zero, size: srcSize),
+             operation: .sourceOver,
+             fraction: 1)
+    out.unlockFocus()
+
+    let hotSpot = NSPoint(x: gameCursorSize / 2, y: gameCursorSize / 2)
+    return NSCursor(image: out, hotSpot: hotSpot)
+}
+
+/// Kursor mača: sword_mouse.png, 32×32, rotiran 90° udesno.
+private func makeSwordCursor() -> NSCursor {
+    guard let src = loadCursorImage(named: "sword_mouse") else { return .arrow }
+    return makeCursorImage(from: src, rotate90Clockwise: true)
+}
+
+/// Kursor buzdovana: mace_mouse.png, iste dimenzije (32×32), bez rotacije.
+private func makeMaceCursor() -> NSCursor {
+    guard let src = loadCursorImage(named: "mace_mouse") else { return .arrow }
+    return makeCursorImage(from: src, rotate90Clockwise: false)
+}
+
 // MARK: - NSView wrapper za SCNView (miš, tipke)
 private final class SceneKitMapNSView: NSView {
     var scnView: SCNView?
@@ -99,6 +155,24 @@ private final class SceneKitMapNSView: NSView {
     /// Jedna gesta rotacije = jedna strana svijeta (kao klik na kompas); akumuliramo kut, na .ended šaljemo ±90°.
     private var rotateAccumulator: CGFloat = 0
     private static let rotateThreshold: CGFloat = 0.15
+
+    private static let swordCursor: NSCursor = makeSwordCursor()
+    private static let maceCursor: NSCursor = makeMaceCursor()
+
+    /// Odabrani alat u panelu Alati ("sword", "mace", …). Određuje koji kursor se prikazuje (mač ili buzdovan).
+    var selectedToolsPanelItem: String?
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        if handPanMode {
+            addCursorRect(bounds, cursor: .openHand)
+        } else if selectedToolsPanelItem == "mace" {
+            addCursorRect(bounds, cursor: Self.maceCursor)
+        } else {
+            addCursorRect(bounds, cursor: Self.swordCursor)
+        }
+    }
 
     override func layout() {
         super.layout()
@@ -235,9 +309,14 @@ private final class SceneKitMapNSView: NSView {
     override func becomeFirstResponder() -> Bool { true }
     override func resignFirstResponder() -> Bool { true }
 
-    /// Da container prima klikove (i postane first responder za WASD), a hit za teren radimo ručno u mouseDown.
+    /// Donji bar (Nazad, Zid, Tržnica) mora primati klikove – vrati nil za područje bara da SwiftUI gumbi rade.
+    private static let bottomBarHitTestHeight: CGFloat = 140
+
     override func hitTest(_ point: NSPoint) -> NSView? {
-        return bounds.contains(point) ? self : nil
+        guard bounds.contains(point) else { return nil }
+        // Ispod ove visine je donji bar; ne uzimaj hit da Nazad, Zid i Market primaju klik.
+        if point.y < Self.bottomBarHitTestHeight { return nil }
+        return self
     }
 
     /// Kad hit test ne uspije, postavi ovu poruku da parent može prikazati alert (opcionalno).
@@ -271,7 +350,8 @@ private final class SceneKitMapNSView: NSView {
             .categoryBitMask: 1
         ]
         let hits = sv.hitTest(hitPointInView, options: hitOptions)
-        guard let hit = hits.first(where: { $0.node.name == "terrain" || $0.node.geometry is SCNPlane }),
+        // Samo teren – da klik preko zida/tržnice pogodi ćeliju ispod, ne 3D model (placements imaju categoryBitMask 0).
+        guard let hit = hits.first(where: { $0.node.name == "terrain" }),
               let convert = onCellHit,
               let (row, col) = convert(hit.worldCoordinates) else {
             if hits.isEmpty { onPlacementError?("Klik nije pogodio teren.") }
@@ -466,11 +546,12 @@ struct SceneKitMapView: NSViewRepresentable {
         refreshGrid(gridNode: gridNode, zoom: gameState.mapCameraSettings.currentZoom)
         scene.rootNode.addChildNode(gridNode)
 
+        // categoryBitMask 0 da klikovi prolaze kroz postavljenje (zid, tržnica) i pogode teren – inače ne možeš graditi drugi objekt na praznu ćeliju kad klikneš preko postojećeg.
         let placementsNode = SCNNode()
         placementsNode.name = "placements"
         placementsNode.position = SCNVector3Zero
         placementsNode.eulerAngles = SCNVector3Zero
-        placementsNode.categoryBitMask = 1
+        placementsNode.categoryBitMask = 0
         scene.rootNode.addChildNode(placementsNode)
 
         // Samo kamera (i njen target) se pomiče pri panu; mapa je fiksna u sceni
@@ -515,7 +596,7 @@ struct SceneKitMapView: NSViewRepresentable {
         coord.cameraTarget = cameraTarget
         coord.pivotIndicatorNode = pivotIndicator
         coord.gridNode = gridNode
-        // Template za postavljeni zid mora biti odvojen čvor s vlastitim materijalima (tekstura).
+        // Template za postavljeni zid (1×1) – širina/dubina na ćeliju, visina iz omjera modela.
         if let placementWallNode = Wall.loadSceneKitNode(from: .main) {
             let templateContainer = SCNNode()
             placementWallNode.position = SCNVector3Zero
@@ -548,6 +629,38 @@ struct SceneKitMapView: NSViewRepresentable {
             scene.rootNode.addChildNode(ghostNode)
             coord.ghostPlacementNode = ghostNode
         }
+        // Template i ghost za Tržnicu (Market) – 3×3 ćelije; zeleni duh pri pomicanju, puni model pri kliku.
+        let marketCellSize = 3
+        if let placementMarketNode = Market.loadSceneKitNode(from: .main) {
+            let templateContainer = SCNNode()
+            placementMarketNode.position = SCNVector3Zero
+            templateContainer.addChildNode(placementMarketNode)
+            var (minB, maxB) = templateContainer.boundingBox
+            let dx = max(CGFloat(maxB.x - minB.x), 0.1)
+            let dz = max(CGFloat(maxB.z - minB.z), 0.1)
+            let scaleX = (CGFloat(marketCellSize) * cellSizeW) / dx
+            let scaleZ = (CGFloat(marketCellSize) * cellSizeH) / dz
+            let scaleY = min(scaleX, scaleZ)
+            placementMarketNode.scale = SCNVector3(scaleX, scaleY, scaleZ)
+            coord.marketPlacementTemplate = templateContainer
+            let ghostNode = templateContainer.clone()
+            duplicateMaterialsRecursive(ghostNode)
+            ghostNode.name = "ghostMarket"
+            ghostNode.isHidden = true
+            ghostNode.categoryBitMask = 0
+            ghostNode.childNodes.forEach { $0.categoryBitMask = 0 }
+            applyTransparencyRecursive(0.6, to: ghostNode)
+            scene.rootNode.addChildNode(ghostNode)
+            coord.ghostMarketNode = ghostNode
+        } else {
+            let ghostNode = makeGhostMarketNode()
+            ghostNode.name = "ghostMarket"
+            ghostNode.isHidden = true
+            ghostNode.categoryBitMask = 0
+            ghostNode.childNodes.forEach { $0.categoryBitMask = 0 }
+            scene.rootNode.addChildNode(ghostNode)
+            coord.ghostMarketNode = ghostNode
+        }
         coord.lastGridZoom = CGFloat(gameState.mapCameraSettings.currentZoom)
 
         container.onCellHit = { worldPos in
@@ -555,17 +668,23 @@ struct SceneKitMapView: NSViewRepresentable {
         }
 
         container.onMouseMove = { [gameState] loc in
-            guard gameState.selectedPlacementObjectId == Wall.objectId else {
+            let objId = gameState.selectedPlacementObjectId
+            let isWall = objId == Wall.objectId
+            let isMarket = objId == Market.objectId
+            guard isWall || isMarket else {
                 coord.ghostPlacementNode?.isHidden = true
+                coord.ghostMarketNode?.isHidden = true
                 return
             }
             guard let sv = container.scnView else {
                 coord.ghostPlacementNode?.isHidden = true
+                coord.ghostMarketNode?.isHidden = true
                 return
             }
             let hitPointInView = container.convert(loc, to: sv)
             guard sv.bounds.contains(hitPointInView) else {
                 coord.ghostPlacementNode?.isHidden = true
+                coord.ghostMarketNode?.isHidden = true
                 return
             }
             let hitOptions: [SCNHitTestOption: Any] = [
@@ -573,16 +692,30 @@ struct SceneKitMapView: NSViewRepresentable {
                 .categoryBitMask: 1
             ]
             let hits = sv.hitTest(hitPointInView, options: hitOptions)
+            // Samo teren – da ghost prati ćeliju ispod miša i preko postavljenih objekata (placements imaju categoryBitMask 0).
             guard let hit = hits.first(where: { $0.node.name == "terrain" }),
                   let (row, col) = cellFromMapLocalPosition(hit.worldCoordinates) else {
                 coord.ghostPlacementNode?.isHidden = true
+                coord.ghostMarketNode?.isHidden = true
                 return
             }
-            // Ghost = zelena (dostupno). U budućnosti: crvena kad ne može postaviti (canPlace == false).
             let ghostColor = NSColor(red: 0.15, green: 0.95, blue: 0.25, alpha: 1)
-            applyGhostColorRecursive(coord.ghostPlacementNode, color: ghostColor, transparency: 0.55)
-            coord.ghostPlacementNode?.position = worldPositionAtCell(row: row, col: col)
-            coord.ghostPlacementNode?.isHidden = false
+            if isWall {
+                let pos = worldPositionAtCell(row: row, col: col)
+                applyGhostColorRecursive(coord.ghostPlacementNode, color: ghostColor, transparency: 0.55)
+                coord.ghostPlacementNode?.position = pos
+                coord.ghostPlacementNode?.isHidden = false
+                coord.ghostMarketNode?.isHidden = true
+            } else {
+                // Market je 3×3 – centar bloka (row, col) je gornji lijevi kut, centar prikaza na (row+1, col+1)
+                let centerRow = row + 3 / 2
+                let centerCol = col + 3 / 2
+                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
+                applyGhostColorRecursive(coord.ghostMarketNode, color: ghostColor, transparency: 0.55)
+                coord.ghostMarketNode?.position = pos
+                coord.ghostMarketNode?.isHidden = false
+                coord.ghostPlacementNode?.isHidden = true
+            }
         }
 
         scnView.scene = scene
@@ -591,7 +724,7 @@ struct SceneKitMapView: NSViewRepresentable {
         scnView.delegate = coord
         applyCamera(cameraNode: cameraNode, targetNode: cameraTarget, settings: gameState.mapCameraSettings)
         gridNode.isHidden = !showGrid
-        refreshPlacements(placementsNode, placements: gameState.gameMap.placements, wallTemplate: coord.wallPlacementTemplate)
+        refreshPlacements(placementsNode, placements: gameState.gameMap.placements, wallTemplate: coord.wallPlacementTemplate, marketTemplate: coord.marketPlacementTemplate)
         DispatchQueue.main.async {
             gameState.isLevelReady = true
             gameState.runSoloResourceAnimationIfNeeded()
@@ -622,16 +755,16 @@ struct SceneKitMapView: NSViewRepresentable {
         container.installTrackpadMonitorsIfNeeded()
         container.onClick = { [weak container, gameState, coord] row, col in
             guard let container else { return }
-            if container.isEraseMode, let onRemoveAt = onRemoveAt {
+                if container.isEraseMode, let onRemoveAt = onRemoveAt {
                 onRemoveAt(row, col)
                 if let node = coord.placementsNode {
-                    refreshPlacements(node, placements: gameState.gameMap.placements, wallTemplate: coord.wallPlacementTemplate)
+                    refreshPlacements(node, placements: gameState.gameMap.placements, wallTemplate: coord.wallPlacementTemplate, marketTemplate: coord.marketPlacementTemplate)
                 }
                 return
             }
             let objectId = container.currentSelectedPlacementObjectId ?? gameState.selectedPlacementObjectId
             guard let objId = objectId, !objId.isEmpty else {
-                let msg = "Zid nije odabran. Prvo odaberi Dvor → Zid u donjem baru."
+                let msg = "Objekt nije odabran. Odaberi Zid ili Tržnicu u Dvoru (donji bar)."
                 DispatchQueue.main.async { gameState.placementError = msg }
                 return
             }
@@ -641,7 +774,7 @@ struct SceneKitMapView: NSViewRepresentable {
                 }
                 let ok = gameState.placeSelectedObjectAt(row: row, col: col)
                 if ok, let node = coord.placementsNode {
-                    refreshPlacements(node, placements: gameState.gameMap.placements, wallTemplate: coord.wallPlacementTemplate)
+                    refreshPlacements(node, placements: gameState.gameMap.placements, wallTemplate: coord.wallPlacementTemplate, marketTemplate: coord.marketPlacementTemplate)
                 }
             }
         }
@@ -661,6 +794,7 @@ struct SceneKitMapView: NSViewRepresentable {
         } else {
             container.removeTrackpadMonitors()
         }
+        container.selectedToolsPanelItem = gameState.selectedToolsPanelItem
 
         return container
     }
@@ -673,6 +807,8 @@ struct SceneKitMapView: NSViewRepresentable {
         container.isEraseMode = isEraseMode
         container.hasObjectSelected = isPlaceMode
         container.currentSelectedPlacementObjectId = gameState.selectedPlacementObjectId
+        container.selectedToolsPanelItem = gameState.selectedToolsPanelItem
+        container.window?.invalidateCursorRects(for: container)
 
         if let w = container.window, w.isKeyWindow, w.firstResponder != container {
             w.makeFirstResponder(container)
@@ -705,6 +841,9 @@ struct SceneKitMapView: NSViewRepresentable {
         }
         if let ghost = coord.ghostPlacementNode {
             ghost.isHidden = gameState.selectedPlacementObjectId != Wall.objectId
+        }
+        if let ghostMarket = coord.ghostMarketNode {
+            ghostMarket.isHidden = gameState.selectedPlacementObjectId != Market.objectId
         }
         if let grid = coord.gridNode {
             grid.isHidden = !showGrid
@@ -762,13 +901,30 @@ struct SceneKitMapView: NSViewRepresentable {
         )
     }
 
-    private func refreshPlacements(_ node: SCNNode?, placements: [Placement], wallTemplate: SCNNode?) {
+    private func refreshPlacements(_ node: SCNNode?, placements: [Placement], wallTemplate: SCNNode?, marketTemplate: SCNNode?) {
         guard let node = node else { return }
         node.childNodes.forEach { $0.removeFromParentNode() }
         node.isHidden = false
         let wallBoxFallback = makePlacementBoxNode()
         wallBoxFallback.categoryBitMask = 0
         for p in placements {
+            if p.objectId == Market.objectId, let template = marketTemplate?.clone(), !template.childNodes.isEmpty {
+                // Tržnica 3×3 – jedan čvor na centru bloka
+                let centerRow = p.row + p.height / 2
+                let centerCol = p.col + p.width / 2
+                let pos = worldPositionAtCell(row: centerRow, col: centerCol)
+                var (minB, _) = template.boundingBox
+                template.position = SCNVector3(pos.x, -CGFloat(minB.y), pos.z)
+                template.isHidden = false
+                template.categoryBitMask = 0
+                template.childNodes.forEach {
+                    $0.categoryBitMask = 0
+                    $0.isHidden = false
+                }
+                _ = Market.reapplyTexture(to: template, bundle: .main)
+                node.addChildNode(template)
+                continue
+            }
             for r in p.row..<(p.row + p.height) {
                 for c in p.col..<(p.col + p.width) {
                     let pos = worldPositionAtCell(row: r, col: c)
@@ -781,7 +937,6 @@ struct SceneKitMapView: NSViewRepresentable {
                             $0.categoryBitMask = 0
                             $0.isHidden = false
                         }
-                        // Ponovno primijeni teksturu na klon – SceneKit klonovi ponekad ne zadrže diffuse
                         _ = Wall.reapplyTexture(to: template, bundle: .main)
                         node.addChildNode(template)
                     } else {
@@ -820,7 +975,9 @@ struct SceneKitMapView: NSViewRepresentable {
         var pivotIndicatorNode: SCNNode?
         var gridNode: SCNNode?
         var ghostPlacementNode: SCNNode?
+        var ghostMarketNode: SCNNode?
         var wallPlacementTemplate: SCNNode?
+        var marketPlacementTemplate: SCNNode?
         var lastGridZoom: CGFloat = 1
         weak var gameState: GameState?
         /// Glatka animacija: interpolira se prema target zoomu (iz gameState).
@@ -853,7 +1010,7 @@ struct SceneKitMapView: NSViewRepresentable {
         }
     }
 
-    /// Ghost 3D zid koji prati kursor – samo .obj zid, bez kocke; skaliran točno na ćeliju 1×1, poluproziran.
+    /// Ghost 3D zid – 1×1 ćelija, skaliran iz omjera modela, poluproziran.
     private func makeGhostWallNode() -> SCNNode {
         let container = SCNNode()
         guard let wallNode = Wall.loadSceneKitNode(from: .main) else {
@@ -868,6 +1025,26 @@ struct SceneKitMapView: NSViewRepresentable {
         let scaleZ = cellSizeH / dz
         let scaleY = min(scaleX, scaleZ)
         wallNode.scale = SCNVector3(scaleX, scaleY, scaleZ)
+        applyTransparencyRecursive(0.6, to: container)
+        return container
+    }
+
+    /// Ghost 3D tržnice – skaliran na 3×3 ćelije, poluproziran (zelena pri pomicanju).
+    private func makeGhostMarketNode() -> SCNNode {
+        let container = SCNNode()
+        guard let marketNode = Market.loadSceneKitNode(from: .main) else {
+            return container
+        }
+        marketNode.position = SCNVector3Zero
+        container.addChildNode(marketNode)
+        var (minB, maxB) = container.boundingBox
+        let dx = max(CGFloat(maxB.x - minB.x), 0.1)
+        let dz = max(CGFloat(maxB.z - minB.z), 0.1)
+        let marketCellSize: CGFloat = 3
+        let scaleX = (marketCellSize * cellSizeW) / dx
+        let scaleZ = (marketCellSize * cellSizeH) / dz
+        let scaleY = min(scaleX, scaleZ)
+        marketNode.scale = SCNVector3(scaleX, scaleY, scaleZ)
         applyTransparencyRecursive(0.6, to: container)
         return container
     }

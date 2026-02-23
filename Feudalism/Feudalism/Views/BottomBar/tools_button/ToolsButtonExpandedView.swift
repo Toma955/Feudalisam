@@ -2,7 +2,7 @@
 //  ToolsButtonExpandedView.swift
 //  Feudalism
 //
-//  Prošireni sadržaj za kategoriju Alati: Sword (zeleno), Mace, Report, Shovel, Pen.
+//  Prošireni sadržaj za kategoriju Alati: Sword (sword_icon, zeleno kad označen), Mace (mace.png, crveno kad označen), Report, Shovel, Pen.
 //
 
 import SwiftUI
@@ -12,6 +12,7 @@ private let toolColumnWidth: CGFloat = 48
 
 struct ToolsButtonExpandedView: View {
     @EnvironmentObject private var gameState: GameState
+    @Binding var selectedToolId: String?
     var onSelectSword: () -> Void
     var onSelectMace: () -> Void
     var onSelectReport: () -> Void
@@ -21,11 +22,11 @@ struct ToolsButtonExpandedView: View {
     var body: some View {
         VStack(spacing: 4) {
             HStack(spacing: 14) {
-                toolButton(icon: "sword", systemName: "crossed.swords", labelKey: "tools_sword", isHighlighted: true, action: onSelectSword)
-                toolButton(icon: "mace", systemName: "hammer.fill", labelKey: "tools_mace", isHighlighted: false, action: onSelectMace)
-                toolButton(icon: "report", systemName: "doc.text.fill", labelKey: "tools_report", isHighlighted: false, action: onSelectReport)
-                toolButton(icon: "shovel", systemName: "square.fill", labelKey: "tools_shovel", isHighlighted: false, action: onSelectShovel)
-                toolButton(icon: "pen", systemName: "pencil", labelKey: "tools_pen", isHighlighted: false, action: onSelectPen)
+                toolButton(icon: "sword_icon", systemName: "crossed.swords", labelKey: "tools_sword", isHighlighted: selectedToolId == "sword", highlightColor: .green, action: onSelectSword)
+                toolButton(icon: "mace", systemName: "hammer.fill", labelKey: "tools_mace", isHighlighted: selectedToolId == "mace", highlightColor: .red, action: onSelectMace)
+                toolButton(icon: "report", systemName: "doc.text.fill", labelKey: "tools_report", isHighlighted: selectedToolId == "report", highlightColor: .green, action: onSelectReport)
+                toolButton(icon: "shovel", systemName: "square.fill", labelKey: "tools_shovel", isHighlighted: selectedToolId == "shovel", highlightColor: .green, action: onSelectShovel)
+                toolButton(icon: "pen", systemName: "pencil", labelKey: "tools_pen", isHighlighted: selectedToolId == "pen", highlightColor: .green, action: onSelectPen)
             }
             HStack(spacing: 14) {
                 toolLabel("tools_sword").frame(width: toolColumnWidth, alignment: .center)
@@ -39,7 +40,7 @@ struct ToolsButtonExpandedView: View {
         .padding(.vertical, 6)
     }
 
-    private func toolButton(icon: String, systemName: String, labelKey: String, isHighlighted: Bool, action: @escaping () -> Void) -> some View {
+    private func toolButton(icon: String, systemName: String, labelKey: String, isHighlighted: Bool, highlightColor: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Group {
                 if let img = loadBarIcon(named: icon) {
@@ -52,10 +53,10 @@ struct ToolsButtonExpandedView: View {
                 }
             }
             .frame(width: toolColumnWidth, height: toolColumnWidth)
-            .foregroundStyle(isHighlighted ? Color.green : .white.opacity(0.95))
+            .foregroundStyle(isHighlighted ? highlightColor : .white.opacity(0.95))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(isHighlighted ? Color.green : .clear, lineWidth: 2)
+                    .strokeBorder(isHighlighted ? highlightColor : .clear, lineWidth: 2)
             )
         }
         .buttonStyle(.plain)

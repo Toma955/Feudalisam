@@ -81,7 +81,8 @@ extension ObjectCategory {
             return [
                 GameObject(name: "Dvorac", category: .dvorac, width: 8, height: 8),
                 GameObject(name: "Kula", category: .dvorac, width: 3, height: 3),
-                GameObject(name: "Kuća", category: .dvorac, width: 4, height: 4) // basic 4×4
+                GameObject(name: "Kuća", category: .dvorac, width: 4, height: 4), // basic 4×4
+                Market.gameObject
             ]
         case .vojnici:
             return [

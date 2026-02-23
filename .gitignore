@@ -38,3 +38,6 @@ Pods/
 
 # Carthage
 Carthage/Build/
+
+# Veliki 3D modeli (preko GitHub limita 100 MB) – drži lokalno, build kopira iz Core/Objects/
+Feudalism/Feudalism/Core/Objects/Market/Meshy_AI_market_0223090758_texture.obj

@@ -122,6 +122,9 @@ final class GameState: ObservableObject {
     /// Odabrani objekt za postavljanje (npr. Wall.objectId); nil = ništa odabrano.
     @Published var selectedPlacementObjectId: String?
 
+    /// Odabrani alat u panelu Alati: "sword", "mace", "report", "shovel", "pen". Nil = mač (zadano). Utječe na kursor i oznaku u panelu.
+    @Published var selectedToolsPanelItem: String?
+
     /// Mapa mape – grid u 1×1 jedinicama (100×100, 200×200 ili 1000×1000).
     @Published var gameMap: GameMap
 
@@ -144,6 +147,7 @@ final class GameState: ObservableObject {
     private static let playerEmblemIdKey = "Feudalism.playerEmblemId"
     private static let showStartupAnimationKey = "Feudalism.showStartupAnimation"
     private static let showBottomBarLabelsKey = "Feudalism.showBottomBarLabels"
+    private static let playPlacementSoundKey = "Feudalism.playPlacementSound"
     private static let audioMusicVolumeKey = "Feudalism.audioMusicVolume"
     private static let audioSoundsVolumeKey = "Feudalism.audioSoundsVolume"
     private static let audioSpeechVolumeKey = "Feudalism.audioSpeechVolume"
@@ -191,6 +195,11 @@ final class GameState: ObservableObject {
         didSet { UserDefaults.standard.set(showBottomBarLabels, forKey: Self.showBottomBarLabelsKey) }
     }
 
+    /// true = pri reprodukciji zvuka pri postavljanju objekta (place.wav). Postavke → Audio.
+    @Published var playPlacementSound: Bool {
+        didSet { UserDefaults.standard.set(playPlacementSound, forKey: Self.playPlacementSoundKey) }
+    }
+
     init(mapSize: MapSizePreset = .small) {
         self.gameMap = mapSize.makeGameMap()
         let raw = UserDefaults.standard.string(forKey: Self.inputDeviceKey) ?? InputDevice.trackpad.rawValue
@@ -202,6 +211,7 @@ final class GameState: ObservableObject {
         self.playerEmblemId = PlayerEmblem(rawValue: emblemRaw)?.rawValue ?? PlayerEmblem.shield.rawValue
         self.showStartupAnimation = UserDefaults.standard.object(forKey: Self.showStartupAnimationKey) as? Bool ?? true
         self.showBottomBarLabels = UserDefaults.standard.object(forKey: Self.showBottomBarLabelsKey) as? Bool ?? true
+        self.playPlacementSound = UserDefaults.standard.object(forKey: Self.playPlacementSoundKey) as? Bool ?? true
         self.audioMusicVolume = UserDefaults.standard.object(forKey: Self.audioMusicVolumeKey) as? Double ?? 0.6
         self.audioSoundsVolume = UserDefaults.standard.object(forKey: Self.audioSoundsVolumeKey) as? Double ?? 0.8
         self.audioSpeechVolume = UserDefaults.standard.object(forKey: Self.audioSpeechVolumeKey) as? Double ?? 0.8
@@ -306,6 +316,9 @@ final class GameState: ObservableObject {
         }
         placementsVersion += 1
         objectWillChange.send()
+        if playPlacementSound {
+            AudioManager.shared.playSound(named: "place", volume: audioSoundsVolume)
+        }
         return true
     }
 

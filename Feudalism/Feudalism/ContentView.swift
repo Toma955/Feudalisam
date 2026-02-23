@@ -310,10 +310,12 @@ struct ContentView: View {
             switch category {
             case .castle:
                 CastleButtonExpandedView(
-                    onSelectWall: { gameState.selectedPlacementObjectId = Wall.objectId }
+                    onSelectWall: { gameState.selectedPlacementObjectId = Wall.objectId },
+                    onSelectMarket: { gameState.selectedPlacementObjectId = Market.objectId }
                 )
                 .padding(.horizontal, 24)
                 .padding(.vertical, 16)
+                .contentShape(Rectangle())
             case .farm:
                 FarmButtonExpandedView(
                     onSelectAppleFarm: { /* objekt – uskoro */ },
@@ -330,11 +332,12 @@ struct ContentView: View {
                 )
             case .tools:
                 ToolsButtonExpandedView(
-                    onSelectSword: { /* označen zeleno – akcija uskoro */ },
-                    onSelectMace: { /* mace.png */ },
-                    onSelectReport: { /* report.png */ },
-                    onSelectShovel: { /* shovel.png */ },
-                    onSelectPen: { /* pen.png */ }
+                    selectedToolId: $gameState.selectedToolsPanelItem,
+                    onSelectSword: { gameState.selectedToolsPanelItem = "sword" },
+                    onSelectMace: { gameState.selectedToolsPanelItem = "mace" },
+                    onSelectReport: { gameState.selectedToolsPanelItem = "report" },
+                    onSelectShovel: { gameState.selectedToolsPanelItem = "shovel" },
+                    onSelectPen: { gameState.selectedToolsPanelItem = "pen" }
                 )
             case .sword, .mine, .cave, .food:
                 HStack(spacing: 12) {
@@ -349,6 +352,8 @@ struct ContentView: View {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(.white.opacity(0.9))
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }

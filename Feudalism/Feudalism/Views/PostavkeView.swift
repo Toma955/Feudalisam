@@ -131,6 +131,12 @@ struct PostavkeView: View {
     private var audioContent: some View {
         Form {
             Section {
+                Toggle("Zvuk kreiranja", isOn: $gameState.playPlacementSound)
+                Text("Kad je uključeno, pri postavljanju objekta na mapu (npr. zid) reproducira se zvuk (place.wav).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: { Text("Zvuk pri postavljanju") }
+            Section {
                 VStack(alignment: .leading, spacing: 12) {
                     volumeRow(title: "Muzika mape", icon: "music.note", value: $gameState.audioMusicVolume)
                     volumeRow(title: "Zvukovi", icon: "speaker.wave.2.fill", value: $gameState.audioSoundsVolume)
@@ -326,6 +332,12 @@ struct PostavkeSectionContent: View {
 
     private var audioContent: some View {
         Form {
+            Section {
+                Toggle("Zvuk kreiranja", isOn: $gameState.playPlacementSound)
+                Text("Kad je uključeno, pri postavljanju objekta na mapu reproducira se zvuk (place.wav).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: { Text("Zvuk pri postavljanju") }
             Section {
                 volumeRow(title: "Muzika mape", icon: "music.note", value: $gameState.audioMusicVolume)
                 volumeRow(title: "Zvukovi", icon: "speaker.wave.2.fill", value: $gameState.audioSoundsVolume)
