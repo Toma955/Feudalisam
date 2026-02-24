@@ -8,9 +8,11 @@
 
 import Foundation
 
-/// Ugovor za svaki tip zida: objectId, visina kao X/10, kasnije i trošak/život po tipu.
+/// Ugovor za svaki tip zida: objectId, visina u jedinicama (parent koristi za 3D), razina X/10.
 protocol WallParentProtocol {
     static var objectId: String { get }
+    /// Visina zida u SceneKit jedinicama (npr. 400 veliki, 240 mali). ParentWall i trokutasti elementi koriste ovo.
+    static var wallHeightInUnits: CGFloat { get }
     /// Visina zida: 10 = veliki (10/10), 6 = mali (6/10).
     static var wallHeightLevel: Int { get }
     /// Maksimalna visina (nazivnik) – uvijek 10.
@@ -46,16 +48,27 @@ enum WallParent {
 
     /// Nazivnik visine (uvijek 10).
     static let wallHeightMax = 10
+
+    /// Visina zida u jedinicama za objectId (za ParentWall i dijagonalne spojnice).
+    static func wallHeightInUnits(for objectId: String) -> CGFloat {
+        switch objectId {
+        case HugeWall.objectId: return HugeWall.wallHeightInUnits
+        case SmallWall.objectId: return SmallWall.wallHeightInUnits
+        default: return ParentWall.defaultWallHeight
+        }
+    }
 }
 
-// MARK: - Veliki zid (HugeWall) – 10/10.
+// MARK: - Veliki zid (HugeWall) – 10/10, 400 jedinica.
 extension HugeWall: WallParentProtocol {
+    static var wallHeightInUnits: CGFloat { ParentWall.defaultWallHeight }
     static var wallHeightLevel: Int { 10 }
     static var wallHeightMax: Int { 10 }
 }
 
-// MARK: - Mali zid – 6/10.
+// MARK: - Mali zid (SmallWall) – 6/10, 240 jedinica.
 extension SmallWall: WallParentProtocol {
+    static var wallHeightInUnits: CGFloat { 240 }
     static var wallHeightLevel: Int { 6 }
     static var wallHeightMax: Int { 10 }
 }

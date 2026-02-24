@@ -242,9 +242,8 @@ enum ParentWall {
         return true
     }
 
-    /// Visina zida za korištenje u mapi (npr. za scaling dijagonalnih elemenata).
+    /// Visina zida za korištenje u mapi (npr. za scaling dijagonalnih elemenata). Čita iz child tipova (WallParent).
     static func wallHeight(for objectId: String) -> CGFloat {
-        if objectId == SmallWall.objectId { return 240 }
-        return defaultWallHeight
+        WallParent.wallHeightInUnits(for: objectId)
     }
 }

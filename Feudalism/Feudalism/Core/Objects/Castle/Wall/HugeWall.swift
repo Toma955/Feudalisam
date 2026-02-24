@@ -2,14 +2,12 @@
 //  HugeWall.swift
 //  Feudalism
 //
-//  Veliki zid (huge_wall): jedan kvadrat (40×40×400). Koristi ParentWall za 3D i teksture.
+//  Veliki zid (huge_wall): child od ParentWall; samo prosljeđuje visinu (wallHeightInUnits). Parent radi 3D i teksture.
 //
 
 import Foundation
 import AppKit
 import SceneKit
-
-private let hugeWallHeight: CGFloat = ParentWall.defaultWallHeight
 
 enum HugeWall: PlaceableSceneKitObject {
     static let objectId = "object_huge_wall"
@@ -29,11 +27,11 @@ enum HugeWall: PlaceableSceneKitObject {
     }
 
     static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? {
-        ParentWall.loadSceneKitNode(from: bundle, wallHeight: hugeWallHeight)
+        ParentWall.loadSceneKitNode(from: bundle, wallHeight: wallHeightInUnits)
     }
 
     static func reapplyTexture(to node: SCNNode, bundle: Bundle = .main) -> Bool {
-        ParentWall.reapplyTexture(to: node, bundle: bundle, wallHeight: hugeWallHeight)
+        ParentWall.reapplyTexture(to: node, bundle: bundle, wallHeight: wallHeightInUnits)
     }
 
     static func printTextureDiagnostics(bundle: Bundle = .main) {}
