@@ -11,7 +11,7 @@ import AppKit
 import SceneKit
 
 /// Pekara – objekt koji se gradi na karti. Kategorija: hrana.
-enum Bakery {
+enum Bakery: PlaceableSceneKitObject {
     static let objectId = "object_bakery"
     static let displayCode = "P"
 
@@ -32,12 +32,22 @@ enum Bakery {
     }
 
     static func modelURL(in bundle: Bundle = .main) -> URL? {
-        if let url = bundle.url(forResource: modelAssetName, withExtension: "obj", subdirectory: modelSubdirectory) {
-            return url
+        let namesToTry = [modelAssetName, "Bakery"]
+        for name in namesToTry {
+            if let url = bundle.url(forResource: name, withExtension: "obj", subdirectory: modelSubdirectory) { return url }
+            if let url = bundle.url(forResource: name, withExtension: "obj", subdirectory: "Food/Bakery") { return url }
+            if let url = bundle.url(forResource: name, withExtension: "obj", subdirectory: "Bakery") { return url }
+            if let url = bundle.url(forResource: name, withExtension: "obj") { return url }
         }
-        return bundle.url(forResource: modelAssetName, withExtension: "obj", subdirectory: "Food/Bakery")
-            ?? bundle.url(forResource: modelAssetName, withExtension: "obj", subdirectory: "Bakery")
-            ?? bundle.url(forResource: modelAssetName, withExtension: "obj")
+        if let base = bundle.resourceURL {
+            for name in namesToTry {
+                for rel in ["Core/Objects/Food/Bakery/\(name).obj", "Food/Bakery/\(name).obj", "Bakery/\(name).obj", "\(name).obj"] {
+                    let full = base.appendingPathComponent(rel)
+                    if (try? full.checkResourceIsReachable()) == true { return full }
+                }
+            }
+        }
+        return nil
     }
 
     private static let textureSubdirectories: [String?] = [

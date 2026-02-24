@@ -87,6 +87,7 @@ extension ObjectCategory {
         case .dvorac:
             return [
                 Castle.gameObject,
+                Steps.gameObject,
                 House.gameObject,
                 Well.gameObject,
                 Hotel.gameObject,

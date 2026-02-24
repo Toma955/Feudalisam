@@ -220,6 +220,7 @@ struct ContentView: View {
     @State private var handPanMode = false
     @State private var showPivotIndicator = false
     @State private var showSettingsPopover = false
+    @StateObject private var placementConsole = PlacementDebugConsole.shared
     /// resources = drvo, kamen, željezo; food = kruh, hmelj, žito
     @State private var resourceStripMode: ResourceStripMode = .resources
     /// HUD ispis 0/0 i postotak – mijenjaju se iz logike (npr. populacija / kapacitet).
@@ -406,11 +407,25 @@ struct ContentView: View {
             switch category {
             case .castle:
                 CastleButtonExpandedView(
-                    onSelectWall: { gameState.selectedPlacementObjectId = Wall.objectId },
-                    onSelectMarket: { gameState.selectedPlacementObjectId = Market.objectId },
+                    onSelectWall: {
+                        placementDebugLog("UI click castle/wall -> \(Wall.objectId)")
+                        gameState.selectedPlacementObjectId = Wall.objectId
+                    },
+                    onSelectMarket: {
+                        placementDebugLog("UI click castle/market -> \(Market.objectId)")
+                        gameState.selectedPlacementObjectId = Market.objectId
+                    },
                     onSelectArmory: { /* dvor – uskoro */ },
-                    onSelectSteps: { /* dvor – uskoro */ },
-                    onSelectStairs: { /* dvor – uskoro */ },
+                    onSelectSteps: {
+                        let targetId = gameState.isSoloMode ? Steps.objectId : Wall.objectId
+                        placementDebugLog("UI click castle/steps -> \(targetId)")
+                        gameState.selectedPlacementObjectId = targetId
+                    },
+                    onSelectStairs: {
+                        let targetId = gameState.isSoloMode ? Steps.objectId : Wall.objectId
+                        placementDebugLog("UI click castle/stairs -> \(targetId)")
+                        gameState.selectedPlacementObjectId = targetId
+                    },
                     onSelectTraining: { /* dvor – uskoro */ },
                     onSelectGates: { /* dvor – uskoro */ },
                     onSelectStable: { /* dvor – uskoro */ },
@@ -541,18 +556,6 @@ struct ContentView: View {
 
     private var gameHUD: some View {
         MapScreenHUDBar {
-            Button {
-                gameState.showMainMenu()
-            } label: {
-                Label("Nazad", systemImage: "chevron.backward")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.95))
-            }
-            .buttonStyle(.plain)
-            .help("Nazad na izbornik")
-
-            HUDBarDivider()
-
             // Mapa – veća ikona gumb, bez sive kutije
             Button {
                 // Akcija – npr. pregled mape / fullscreen
@@ -680,6 +683,61 @@ struct ContentView: View {
                     .labelsHidden()
             }
             Divider().background(.white.opacity(0.3))
+            if gameState.isSoloMode {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Placement konzola (Solo)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.95))
+                        Spacer()
+                        Text("\(placementConsole.lines.count)")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 4) {
+                            ForEach(Array(placementConsole.lines.enumerated()), id: \.offset) { _, line in
+                                Text(line)
+                                    .font(.system(size: 10, weight: .regular, design: .monospaced))
+                                    .foregroundStyle(.white.opacity(0.9))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
+                    .frame(height: 170)
+                    .padding(8)
+                    .background(.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 8))
+
+                    HStack(spacing: 8) {
+                        Button {
+                            placementConsole.copyAllToPasteboard()
+                            placementDebugLog("UI copy placement logs (\(placementConsole.lines.count) lines)")
+                        } label: {
+                            Label("Kopiraj sve", systemImage: "doc.on.doc")
+                                .font(.caption)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.white.opacity(0.2))
+                        .foregroundStyle(.white)
+                        .keyboardShortcut("c", modifiers: [.command])
+
+                        Button {
+                            placementConsole.clear()
+                            placementDebugLog("UI clear placement logs")
+                        } label: {
+                            Label("Obriši", systemImage: "trash")
+                                .font(.caption)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.red.opacity(0.3))
+                        .foregroundStyle(.white)
+                    }
+                }
+                Divider().background(.white.opacity(0.3))
+            }
             Button {
                 showSettingsPopover = false
                 gameState.showMainMenu()
@@ -692,7 +750,7 @@ struct ContentView: View {
             .tint(.white.opacity(0.15))
             .foregroundStyle(.white)
         }
-        .frame(width: 200)
+        .frame(width: gameState.isSoloMode ? 460 : 200)
         .padding(14)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
     }

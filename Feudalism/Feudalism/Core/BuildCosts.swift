@@ -33,6 +33,8 @@ final class BuildCosts {
     private func registerDefaults() {
         // Zid: 1 kamen za izgradnju
         set(Wall.objectId, cost: BuildCost(stone: 1, wood: 0, iron: 0))
+        // Stepenice: 1 kamen
+        set(Steps.objectId, cost: BuildCost(stone: 1, wood: 0, iron: 0))
         // Tržnica: 2 kamena, 1 drvo
         set(Market.objectId, cost: BuildCost(stone: 2, wood: 1, iron: 0))
         // Farma: 1 drvo, 0 kamen/željezo

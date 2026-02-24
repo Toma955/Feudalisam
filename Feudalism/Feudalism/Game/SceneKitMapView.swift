@@ -17,9 +17,17 @@ private let mapWorldH: CGFloat = 4000
 private let cellSizeW: CGFloat = mapWorldW / CGFloat(mapCols)
 private let cellSizeH: CGFloat = mapWorldH / CGFloat(mapRows)
 
+/// Razina mreže i tla – ispod y=0 se ništa ne gradi i ne smiju biti objekti.
+private let groundLevelY: CGFloat = 0
+
 // MARK: - Terrain texture (procedural, isto kao SpriteKit)
 /// Fallback boja terena kad proceduralna tekstura nije dostupna (nikad ne ostavljamo bijelo).
 private let terrainFallbackColor = NSColor(red: 0.65, green: 0.55, blue: 0.42, alpha: 1.0)
+private let placementDebugLogs = true
+private func placementDebug(_ msg: String) {
+    guard placementDebugLogs else { return }
+    placementDebugLog(msg)
+}
 
 /// Piksela po logičkoj ćeliji – veće = oštrija tekstura pri zumiranju (24 = 2400×2400 px).
 private let terrainTextureScale = 24
@@ -181,6 +189,8 @@ private final class SceneKitMapNSView: NSView {
     var onRotationDelta: ((CGFloat) -> Void)?
     var onTiltDelta: ((CGFloat) -> Void)?
     var onClick: ((Int, Int) -> Void)?
+    var onWallLinePreview: (([(Int, Int)]) -> Void)?
+    var onWallLineCommit: (([(Int, Int)]) -> Void)?
     var isPanning = false
     var lastPanLocation: NSPoint = .zero
     var handPanMode = false
@@ -190,6 +200,12 @@ private final class SceneKitMapNSView: NSView {
     var onCellHit: ((SCNVector3) -> (row: Int, col: Int)?)?
     /// Poziva se pri pomicanju miša – za ghost objekta (npr. zid) na kursoru.
     var onMouseMove: ((NSPoint) -> Void)?
+    /// Ažuriraj ghost iz trenutne pozicije miša (poziva se iz renderera kad mouseMoved ne stiže).
+    func updateGhostFromCurrentMouseLocation() {
+        guard let win = window else { return }
+        let loc = convert(win.mouseLocationOutsideOfEventStream, from: nil)
+        onMouseMove?(loc)
+    }
     /// Desni klik (npr. otkaz place mode) – ne postavlja objekt.
     var onRightClick: (() -> Void)?
     /// Poziva se nakon uspješnog place da se odmah osvježe čvorovi na sceni (ne čeka updateNSView).
@@ -199,6 +215,9 @@ private final class SceneKitMapNSView: NSView {
     private var trackingArea: NSTrackingArea?
     /// Lijevi klik: hit test na mouseDown, poziv onClick tek na mouseUp ako nije bilo pomicanja (da se ne pomiješa s panom).
     private var pendingClickCell: (row: Int, col: Int)?
+    private var wallLineStartCell: (row: Int, col: Int)?
+    private var wallLineCells: [(Int, Int)] = []
+    var isWallLineActive: Bool { wallLineStartCell != nil }
     private static let clickDragThreshold: CGFloat = 6
     private var mouseDownLocation: NSPoint = .zero
     /// Kad true: dva prsta = pan, pinch = zoom, rotacija = mapRotation. Kad false: miš (povuci = pan, scroll = zoom).
@@ -244,7 +263,7 @@ private final class SceneKitMapNSView: NSView {
         guard bounds.width > 0, bounds.height > 0 else { return }
         let ta = NSTrackingArea(
             rect: bounds,
-            options: [.mouseMoved, .activeInKeyWindow],
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow],
             owner: self,
             userInfo: nil
         )
@@ -253,6 +272,11 @@ private final class SceneKitMapNSView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        let loc = convert(event.locationInWindow, from: nil)
+        onMouseMove?(loc)
+    }
+
+    override func mouseEntered(with event: NSEvent) {
         let loc = convert(event.locationInWindow, from: nil)
         onMouseMove?(loc)
     }
@@ -378,6 +402,62 @@ private final class SceneKitMapNSView: NSView {
     /// Kopija odabranog objekta za postavljanje (ažurira se u updateNSView) da klik uvijek vidi aktualnu vrijednost.
     var currentSelectedPlacementObjectId: String?
 
+    private func terrainCell(at pointInContainer: NSPoint) -> (row: Int, col: Int)? {
+        guard let sv = scnView else { return nil }
+        let hitPointInView = convert(pointInContainer, to: sv)
+        guard sv.bounds.contains(hitPointInView) else { return nil }
+        let hitOptions: [SCNHitTestOption: Any] = [
+            .searchMode: SCNHitTestSearchMode.all.rawValue,
+            .categoryBitMask: 1
+        ]
+        let hits = sv.hitTest(hitPointInView, options: hitOptions)
+        guard let hit = hits.first(where: { $0.node.name == "terrain" }),
+              let convertCell = onCellHit,
+              let cell = convertCell(hit.worldCoordinates) else { return nil }
+        return cell
+    }
+
+    private func buildStraightLineCells(from start: (row: Int, col: Int), to end: (row: Int, col: Int)) -> [(Int, Int)] {
+        let dRow = end.row - start.row
+        let dCol = end.col - start.col
+        if dRow == 0 {
+            let step = dCol >= 0 ? 1 : -1
+            return stride(from: start.col, through: end.col, by: step).map { (start.row, $0) }
+        }
+        if dCol == 0 {
+            let step = dRow >= 0 ? 1 : -1
+            return stride(from: start.row, through: end.row, by: step).map { ($0, start.col) }
+        }
+
+        // Dominantna osa + progresivni "lom":
+        // zadržava efekt 50/50 kod malog pomaka, a pri daljnjem pomicanju nastavlja stepenasto.
+        if abs(dCol) >= abs(dRow) {
+            let stepCol = dCol > 0 ? 1 : -1
+            let count = abs(dCol)
+            let rowSign = dRow > 0 ? 1 : -1
+            return (0...count).map { i in
+                let t = Double(i) / Double(max(1, count))
+                let shiftedRows = Int((t * Double(abs(dRow))).rounded())
+                return (start.row + rowSign * shiftedRows, start.col + i * stepCol)
+            }
+        } else {
+            let stepRow = dRow > 0 ? 1 : -1
+            let count = abs(dRow)
+            let colSign = dCol > 0 ? 1 : -1
+            return (0...count).map { i in
+                let t = Double(i) / Double(max(1, count))
+                let shiftedCols = Int((t * Double(abs(dCol))).rounded())
+                return (start.row + i * stepRow, start.col + colSign * shiftedCols)
+            }
+        }
+    }
+
+    private func clearWallLineDraft() {
+        wallLineStartCell = nil
+        wallLineCells.removeAll(keepingCapacity: false)
+        onWallLinePreview?([])
+    }
+
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         lastPanLocation = convert(event.locationInWindow, from: nil)
@@ -390,25 +470,14 @@ private final class SceneKitMapNSView: NSView {
             return
         }
         if isPanning { return }
-        guard let sv = scnView else {
-            onPlacementError?("Scena nije spremna (scnView je nil).")
+        guard let (row, col) = terrainCell(at: lastPanLocation) else {
+            onPlacementError?("Klik nije pogodio teren.")
             return
         }
-        let hitPointInView = convert(lastPanLocation, to: sv)
-        guard sv.bounds.contains(hitPointInView) else {
-            onPlacementError?("Klik izvan područja mape.")
-            return
-        }
-        let hitOptions: [SCNHitTestOption: Any] = [
-            .searchMode: SCNHitTestSearchMode.all.rawValue,
-            .categoryBitMask: 1
-        ]
-        let hits = sv.hitTest(hitPointInView, options: hitOptions)
-        // Samo teren – da klik preko zida/tržnice pogodi ćeliju ispod, ne 3D model (placements imaju categoryBitMask 0).
-        guard let hit = hits.first(where: { $0.node.name == "terrain" }),
-              let convert = onCellHit,
-              let (row, col) = convert(hit.worldCoordinates) else {
-            if hits.isEmpty { onPlacementError?("Klik nije pogodio teren.") }
+        if !isEraseMode, currentSelectedPlacementObjectId == Wall.objectId {
+            wallLineStartCell = (row, col)
+            wallLineCells = [(row, col)]
+            onWallLinePreview?(wallLineCells)
             return
         }
         pendingClickCell = (row, col)
@@ -416,12 +485,27 @@ private final class SceneKitMapNSView: NSView {
 
     override func rightMouseDown(with event: NSEvent) {
         pendingClickCell = nil
+        clearWallLineDraft()
         onRightClick?()
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard event.buttonNumber == 0 else { return }
         let loc = convert(event.locationInWindow, from: nil)
+        if let start = wallLineStartCell {
+            if let end = terrainCell(at: loc) {
+                let newCells = buildStraightLineCells(from: start, to: end)
+                let changed = newCells.count != wallLineCells.count || zip(newCells, wallLineCells).contains { lhs, rhs in
+                    lhs.0 != rhs.0 || lhs.1 != rhs.1
+                }
+                if changed {
+                    wallLineCells = newCells
+                    onWallLinePreview?(newCells)
+                }
+            }
+            lastPanLocation = loc
+            return
+        }
         let dx = loc.x - lastPanLocation.x
         let dy = loc.y - lastPanLocation.y
         if !isPanning {
@@ -439,6 +523,14 @@ private final class SceneKitMapNSView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if event.buttonNumber == 0, wallLineStartCell != nil {
+            let commitCells = wallLineCells
+            clearWallLineDraft()
+            if !commitCells.isEmpty {
+                onWallLineCommit?(commitCells)
+            }
+            return
+        }
         if event.buttonNumber == 0, !isPanning, let cell = pendingClickCell {
             onClick?(cell.row, cell.col)
         }
@@ -488,6 +580,7 @@ private func refreshGrid(gridNode: SCNNode, zoom: CGFloat) {
     let lineH = baseH / z
     let halfW = mapWorldW / 2
     let halfH = mapWorldH / 2
+    let gridY = groundLevelY + lineH / 2
     var x = -halfW
     while x <= halfW {
         let box = SCNBox(width: lineW, height: lineH, length: mapWorldH, chamferRadius: 0)
@@ -495,7 +588,7 @@ private func refreshGrid(gridNode: SCNNode, zoom: CGFloat) {
         box.firstMaterial?.isDoubleSided = true
         box.firstMaterial?.lightingModel = .constant
         let n = SCNNode(geometry: box)
-        n.position = SCNVector3(x, lineH / 2, 0)
+        n.position = SCNVector3(x, gridY, 0)
         gridNode.addChildNode(n)
         x += cellSizeW
     }
@@ -506,7 +599,7 @@ private func refreshGrid(gridNode: SCNNode, zoom: CGFloat) {
         box.firstMaterial?.isDoubleSided = true
         box.firstMaterial?.lightingModel = .constant
         let n = SCNNode(geometry: box)
-        n.position = SCNVector3(0, lineH / 2, zCoord)
+        n.position = SCNVector3(0, gridY, zCoord)
         gridNode.addChildNode(n)
         zCoord += cellSizeH
     }
@@ -522,13 +615,13 @@ private func cellFromMapLocalPosition(_ localPos: SCNVector3) -> (row: Int, col:
     return (row, col)
 }
 
-/// Sredina ćelije (row, col) u world koordinatama (y = 4 kao placements).
+/// Sredina ćelije (row, col) u world koordinatama. Y koristimo groundLevelY; stvarna y pozicija objekta = max(groundLevelY, -minB.y) da ništa ne ide ispod mreže.
 private func worldPositionAtCell(row: Int, col: Int) -> SCNVector3 {
     let halfW = mapWorldW / 2
     let halfH = mapWorldH / 2
     let x = CGFloat(col) * cellSizeW - halfW + cellSizeW / 2
     let z = CGFloat(row) * cellSizeH - halfH + cellSizeH / 2
-    return SCNVector3(x, 4, z)
+    return SCNVector3(x, groundLevelY, z)
 }
 
 // MARK: - SceneKitMapView (SwiftUI)
@@ -565,39 +658,8 @@ struct SceneKitMapView: NSViewRepresentable {
         Task { await GameAssetLoader.shared.loadAllIfNeeded() }
     }
 
-    func makeNSView(context: Context) -> NSView {
-        let container = SceneKitMapNSView()
-        container.wantsLayer = true
-        let scnView = SCNView()
-        scnView.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(scnView)
-        NSLayoutConstraint.activate([
-            scnView.topAnchor.constraint(equalTo: container.topAnchor),
-            scnView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            scnView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            scnView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-        ])
-        container.scnView = scnView
-
-        scnView.wantsLayer = true
-        scnView.layer?.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
-        scnView.backgroundColor = NSColor(white: 0.15, alpha: 1)
-        scnView.allowsCameraControl = false
-        scnView.antialiasingMode = .multisampling4X
-
-        let halfW = mapWorldW / 2
-        let halfH = mapWorldH / 2
-
-        let scene = SCNScene()
-        scene.rootNode.position = SCNVector3Zero
-        scene.rootNode.eulerAngles = SCNVector3Zero
-
-        // Koristi pred-učitane assete ako je loader završio (IntroView); inače učitaj/generiraj na zahtjev.
-        let loader = GameAssetLoader.shared
-        // Teksturu terena uvijek gradimo na main threadu – SKTexture s pozadinskog threada (cache) u SceneKitu često daje bijelu površinu.
-        let terrainTextureOnMainThread = makeTerrainTexture()
-
-        // Solo mod: učitaj postojeću mapu (bundle ili spremljeni SoloLevel.scn) ili generiraj, spremi i učitaj
+    private func setupSceneAndTerrain(into scene: SCNScene, loader: GameAssetLoader, terrainTexture: Any?) {
+        let terrainTextureOnMainThread = terrainTexture
         let rows = gameState.gameMap.rows
         let cols = gameState.gameMap.cols
         var level: LoadedLevel?
@@ -629,24 +691,19 @@ struct SceneKitMapView: NSViewRepresentable {
             let planeNode = makeProceduralTerrainNode(terrainTexture: terrainTextureOnMainThread)
             scene.rootNode.addChildNode(planeNode)
         }
+    }
 
+    private func setupGridNode(zoom: CGFloat) -> SCNNode {
         let gridNode = SCNNode()
         gridNode.name = "grid"
         gridNode.categoryBitMask = 1
         gridNode.position = SCNVector3Zero
         gridNode.eulerAngles = SCNVector3Zero
-        refreshGrid(gridNode: gridNode, zoom: gameState.mapCameraSettings.currentZoom)
-        scene.rootNode.addChildNode(gridNode)
+        refreshGrid(gridNode: gridNode, zoom: zoom)
+        return gridNode
+    }
 
-        // categoryBitMask 0 da klikovi prolaze kroz postavljenje (zid, tržnica) i pogode teren – inače ne možeš graditi drugi objekt na praznu ćeliju kad klikneš preko postojećeg.
-        let placementsNode = SCNNode()
-        placementsNode.name = "placements"
-        placementsNode.position = SCNVector3Zero
-        placementsNode.eulerAngles = SCNVector3Zero
-        placementsNode.categoryBitMask = 0
-        scene.rootNode.addChildNode(placementsNode)
-
-        // Samo kamera (i njen target) se pomiče pri panu; mapa je fiksna u sceni
+    private func setupCameraAndLights(in scene: SCNScene, halfW: CGFloat, halfH: CGFloat) -> (SCNNode, SCNNode, SCNNode) {
         let cam = SCNCamera()
         cam.zNear = 0.1
         cam.zFar = 500000
@@ -667,7 +724,6 @@ struct SceneKitMapView: NSViewRepresentable {
         lookAt.isGimbalLockEnabled = true
         lookAt.worldUp = SCNVector3(0, 1, 0)
         cameraNode.constraints = [lookAt]
-        scnView.pointOfView = cameraNode
 
         let light = SCNNode()
         light.light = SCNLight()
@@ -681,16 +737,14 @@ struct SceneKitMapView: NSViewRepresentable {
         ambient.light?.intensity = 400
         scene.rootNode.addChildNode(ambient)
 
-        let coord = context.coordinator
-        coord.scene = scene
-        coord.placementsNode = placementsNode
-        coord.cameraNode = cameraNode
-        coord.cameraTarget = cameraTarget
-        coord.pivotIndicatorNode = pivotIndicator
-        coord.gridNode = gridNode
-        // Template i ghost po objectId – jedan izvor (SceneKitPlacementRegistry); koristi cache ako je loader završio (klon da se ne mutira cache).
+        return (cameraNode, cameraTarget, pivotIndicator)
+    }
+
+    private func setupPlacementTemplatesAndGhosts(coord: Coordinator, scene: SCNScene, loader: GameAssetLoader) {
         for config in SceneKitPlacementRegistry.allConfigs {
-            let cachedRaw = loader.isLoaded ? loader.cachedPlacementNode(objectId: config.objectId) : nil
+            // Wall uvijek gradimo svježe (bez cachea) da ne ostane stari minijaturni node.
+            let useCache = config.objectId != Wall.objectId
+            let cachedRaw = (loader.isLoaded && useCache) ? loader.cachedPlacementNode(objectId: config.objectId) : nil
             let cachedNode = cachedRaw?.clone()
             let (template, ghost) = makeTemplateAndGhost(config: config, cachedNode: cachedNode)
             if let t = template {
@@ -702,6 +756,67 @@ struct SceneKitMapView: NSViewRepresentable {
             ghost.childNodes.forEach { $0.categoryBitMask = 0 }
             scene.rootNode.addChildNode(ghost)
         }
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let container = SceneKitMapNSView()
+        container.wantsLayer = true
+        let scnView = SCNView()
+        scnView.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(scnView)
+        NSLayoutConstraint.activate([
+            scnView.topAnchor.constraint(equalTo: container.topAnchor),
+            scnView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            scnView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            scnView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+        ])
+        container.scnView = scnView
+
+        scnView.wantsLayer = true
+        scnView.layer?.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+        scnView.backgroundColor = NSColor(white: 0.15, alpha: 1)
+        scnView.allowsCameraControl = false
+        scnView.antialiasingMode = .multisampling4X
+
+        let halfW = mapWorldW / 2
+        let halfH = mapWorldH / 2
+
+        let scene = SCNScene()
+        scene.rootNode.position = SCNVector3Zero
+        scene.rootNode.eulerAngles = SCNVector3Zero
+
+        let loader = GameAssetLoader.shared
+        let terrainTextureOnMainThread = makeTerrainTexture()
+        setupSceneAndTerrain(into: scene, loader: loader, terrainTexture: terrainTextureOnMainThread)
+
+        let gridNode = setupGridNode(zoom: gameState.mapCameraSettings.currentZoom)
+        scene.rootNode.addChildNode(gridNode)
+
+        let placementsNode = SCNNode()
+        placementsNode.name = "placements"
+        placementsNode.position = SCNVector3Zero
+        placementsNode.eulerAngles = SCNVector3Zero
+        placementsNode.categoryBitMask = 0
+        scene.rootNode.addChildNode(placementsNode)
+        let wallLinePreviewNode = SCNNode()
+        wallLinePreviewNode.name = "wallLinePreview"
+        wallLinePreviewNode.position = SCNVector3Zero
+        wallLinePreviewNode.eulerAngles = SCNVector3Zero
+        wallLinePreviewNode.categoryBitMask = 0
+        scene.rootNode.addChildNode(wallLinePreviewNode)
+
+        let (cameraNode, cameraTarget, pivotIndicator) = setupCameraAndLights(in: scene, halfW: halfW, halfH: halfH)
+        scnView.pointOfView = cameraNode
+
+        let coord = context.coordinator
+        coord.scene = scene
+        coord.placementsNode = placementsNode
+        coord.cameraNode = cameraNode
+        coord.cameraTarget = cameraTarget
+        coord.pivotIndicatorNode = pivotIndicator
+        coord.gridNode = gridNode
+        coord.wallLinePreviewNode = wallLinePreviewNode
+        setupPlacementTemplatesAndGhosts(coord: coord, scene: scene, loader: loader)
 
         coord.lastGridZoom = CGFloat(gameState.mapCameraSettings.currentZoom)
 
@@ -709,12 +824,14 @@ struct SceneKitMapView: NSViewRepresentable {
             cellFromMapLocalPosition(worldPos)
         }
 
-        container.onMouseMove = { [gameState] loc in
+        container.onMouseMove = { [weak container, gameState] loc in
             let objId = gameState.selectedPlacementObjectId
             coord.ghostNodes.values.forEach { $0.isHidden = true }
             guard let objectId = objId, SceneKitPlacementRegistry.placeableObjectIds.contains(objectId),
                   let ghost = coord.ghostNodes[objectId],
                   let config = SceneKitPlacementRegistry.config(for: objectId) else { return }
+            guard let container else { return }
+            if objectId == Wall.objectId, container.isWallLineActive { return }
             guard let sv = container.scnView, sv.bounds.contains(container.convert(loc, to: sv)) else { return }
             let hitOptions: [SCNHitTestOption: Any] = [.searchMode: SCNHitTestSearchMode.all.rawValue, .categoryBitMask: 1]
             let hits = sv.hitTest(container.convert(loc, to: sv), options: hitOptions)
@@ -727,13 +844,50 @@ struct SceneKitMapView: NSViewRepresentable {
                 : (row + config.cellH / 2, col + config.cellW / 2)
             let pos = worldPositionAtCell(row: centerRow, col: centerCol)
             var (minB, _) = ghost.boundingBox
-            let y = -CGFloat(minB.y) + config.yOffset
+            let y = max(groundLevelY, -CGFloat(minB.y) + config.yOffset)
             ghost.position = SCNVector3(pos.x, y, pos.z)
             ghost.isHidden = false
+            if objectId == Wall.objectId {
+                let last = coord.lastGhostCellByObject[objectId]
+                if last?.0 != centerRow || last?.1 != centerCol {
+                    coord.lastGhostCellByObject[objectId] = (centerRow, centerCol)
+                    placementDebug("ghost Wall cell=(\(centerRow),\(centerCol)) pos=(\(Int(pos.x)),\(String(format: "%.2f", y)),\(Int(pos.z))) bboxMinY=\(String(format: "%.3f", CGFloat(minB.y)))")
+                }
+            }
+        }
+
+        container.onWallLinePreview = { [gameState] cells in
+            let existingWalls = wallCellsSet(from: gameState.gameMap.placements)
+            refreshWallLinePreview(
+                coord.wallLinePreviewNode,
+                cells: cells,
+                templates: coord.placementTemplates,
+                existingWallCells: existingWalls
+            )
+        }
+        container.onWallLineCommit = { [gameState, coord] cells in
+            guard !cells.isEmpty else { return }
+            DispatchQueue.main.async {
+                if gameState.selectedPlacementObjectId != Wall.objectId {
+                    gameState.selectedPlacementObjectId = Wall.objectId
+                }
+                var placedAny = false
+                for (row, col) in cells {
+                    let ok = gameState.placeSelectedObjectAt(row: row, col: col, playSound: false)
+                    if ok { placedAny = true }
+                }
+                if placedAny && gameState.playPlacementSound {
+                    AudioManager.shared.playSound(named: "place", volume: gameState.audioSoundsVolume)
+                }
+                if placedAny, let node = coord.placementsNode {
+                    refreshPlacements(node, placements: gameState.gameMap.placements, templates: coord.placementTemplates)
+                }
+            }
         }
 
         scnView.scene = scene
         coord.gameState = gameState
+        coord.mapViewContainer = container
         coord.animatedZoom = CGFloat(gameState.mapCameraSettings.currentZoom)
         scnView.delegate = coord
         applyCamera(cameraNode: cameraNode, targetNode: cameraTarget, settings: gameState.mapCameraSettings)
@@ -778,6 +932,7 @@ struct SceneKitMapView: NSViewRepresentable {
                 return
             }
             let objectId = container.currentSelectedPlacementObjectId ?? gameState.selectedPlacementObjectId
+            placementDebug("map click row=\(row) col=\(col) selected=\(objectId ?? "nil")")
             guard let objId = objectId, !objId.isEmpty else {
                 let msg = "Objekt nije odabran. Odaberi Zid/Tržnicu (Dvor), Mlin/Pekaru (Hrana) ili Kokošinjac/Kukuruz (Farma) u donjem baru."
                 DispatchQueue.main.async { gameState.placementError = msg }
@@ -788,6 +943,7 @@ struct SceneKitMapView: NSViewRepresentable {
                     gameState.selectedPlacementObjectId = objId
                 }
                 let ok = gameState.placeSelectedObjectAt(row: row, col: col)
+                placementDebug("placeSelectedObjectAt object=\(objId) row=\(row) col=\(col) ok=\(ok)")
                 if ok, let node = coord.placementsNode {
                     refreshPlacements(node, placements: gameState.gameMap.placements, templates: coord.placementTemplates)
                 }
@@ -866,6 +1022,9 @@ struct SceneKitMapView: NSViewRepresentable {
                 refreshGrid(gridNode: grid, zoom: zoom)
             }
         }
+        if selectedId != Wall.objectId {
+            coord.wallLinePreviewNode?.childNodes.forEach { $0.removeFromParentNode() }
+        }
         // Ne osvježavaj placements ovdje – inače se pri svakom updateNSView (rotacija, zoom) cijela scena zidova gradi iznova (39 MB .obj + reapplyTexture) → pad FPS. Osvježavanje samo u onClick (place) i nakon onRemoveAt (erase).
     }
 
@@ -914,53 +1073,521 @@ struct SceneKitMapView: NSViewRepresentable {
         )
     }
 
+    private func wallCellsSet(from placements: [Placement]) -> Set<MapCoordinate> {
+        var set: Set<MapCoordinate> = []
+        for p in placements where p.objectId == Wall.objectId {
+            for c in p.coveredCoordinates() { set.insert(c) }
+        }
+        return set
+    }
+
+    private enum TriangleCorner {
+        case nw, ne, sw, se
+    }
+
+    private func makeRightTrianglePrismNode(corner: TriangleCorner, size: CGFloat, height: CGFloat, color: NSColor, alpha: CGFloat = 1.0) -> SCNNode {
+        let h = size / 2
+        let a: SCNVector3
+        let b: SCNVector3
+        let c: SCNVector3
+        switch corner {
+        case .nw:
+            a = SCNVector3(-h, 0, -h); b = SCNVector3(h, 0, -h); c = SCNVector3(-h, 0, h)
+        case .ne:
+            a = SCNVector3(h, 0, -h); b = SCNVector3(-h, 0, -h); c = SCNVector3(h, 0, h)
+        case .sw:
+            a = SCNVector3(-h, 0, h); b = SCNVector3(h, 0, h); c = SCNVector3(-h, 0, -h)
+        case .se:
+            a = SCNVector3(h, 0, h); b = SCNVector3(-h, 0, h); c = SCNVector3(h, 0, -h)
+        }
+        let vertices: [SCNVector3] = [
+            a, b, c,
+            SCNVector3(a.x, height, a.z),
+            SCNVector3(b.x, height, b.z),
+            SCNVector3(c.x, height, c.z),
+        ]
+        let texcoords: [CGPoint] = vertices.map { v in
+            CGPoint(x: (CGFloat(v.x) + h) / size, y: (CGFloat(v.z) + h) / size)
+        }
+        let indices: [UInt32] = [
+            0, 2, 1,
+            3, 4, 5,
+            0, 1, 4, 0, 4, 3,
+            1, 2, 5, 1, 5, 4,
+            2, 0, 3, 2, 3, 5,
+        ]
+        let src = SCNGeometrySource(vertices: vertices)
+        let uv = SCNGeometrySource(textureCoordinates: texcoords)
+        let element = SCNGeometryElement(indices: indices, primitiveType: .triangles)
+        let geo = SCNGeometry(sources: [src, uv], elements: [element])
+        let mat = SCNMaterial()
+        mat.diffuse.contents = color
+        mat.ambient.contents = NSColor.white
+        mat.specular.contents = NSColor.darkGray
+        mat.isDoubleSided = true
+        mat.lightingModel = .physicallyBased
+        mat.transparency = alpha
+        mat.writesToDepthBuffer = true
+        mat.readsFromDepthBuffer = true
+        geo.materials = [mat]
+        return SCNNode(geometry: geo)
+    }
+
+    private func wallCubeHeightFromTemplate(_ template: SCNNode) -> CGFloat {
+        let (minB, maxB) = template.boundingBox
+        return max(1, CGFloat(maxB.y - minB.y))
+    }
+
+    private func isWallLineSloped(_ cells: [(Int, Int)]) -> Bool {
+        guard cells.count >= 2 else { return false }
+        for i in 1..<cells.count {
+            let prev = cells[i - 1]
+            let cur = cells[i]
+            let dRow = abs(cur.0 - prev.0)
+            let dCol = abs(cur.1 - prev.1)
+            if dRow > 0 && dCol > 0 { return true }
+        }
+        return false
+    }
+
+    private func hasAnyDiagonalAdjacency(_ wallCells: Set<MapCoordinate>) -> Bool {
+        guard wallCells.count >= 2 else { return false }
+        for cell in wallCells {
+            let se = MapCoordinate(row: cell.row + 1, col: cell.col + 1)
+            let sw = MapCoordinate(row: cell.row + 1, col: cell.col - 1)
+            if wallCells.contains(se) || wallCells.contains(sw) { return true }
+        }
+        return false
+    }
+
+    private func hasDiagonalAdjacency(in wallCells: Set<MapCoordinate>, involving focus: Set<MapCoordinate>) -> Bool {
+        guard !focus.isEmpty, wallCells.count >= 2 else { return false }
+        for cell in focus {
+            let nw = MapCoordinate(row: cell.row - 1, col: cell.col - 1)
+            let ne = MapCoordinate(row: cell.row - 1, col: cell.col + 1)
+            let sw = MapCoordinate(row: cell.row + 1, col: cell.col - 1)
+            let se = MapCoordinate(row: cell.row + 1, col: cell.col + 1)
+            if wallCells.contains(nw) || wallCells.contains(ne) || wallCells.contains(sw) || wallCells.contains(se) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func stepsRotation(for corner: TriangleCorner) -> CGFloat {
+        switch corner {
+        case .nw: return 0
+        case .ne: return -.pi / 2
+        case .se: return .pi
+        case .sw: return .pi / 2
+        }
+    }
+
+    /// Iz mostne ćelije i susjednih zidova odredi corner pravokutnog trokuta tako da
+    /// katete gledaju prema unutra (prema zidovima), a hipotenuza prema van.
+    private func outwardCorner(for bridge: MapCoordinate, wallCells: Set<MapCoordinate>) -> TriangleCorner? {
+        let n = wallCells.contains(MapCoordinate(row: bridge.row - 1, col: bridge.col))
+        let e = wallCells.contains(MapCoordinate(row: bridge.row, col: bridge.col + 1))
+        let s = wallCells.contains(MapCoordinate(row: bridge.row + 1, col: bridge.col))
+        let w = wallCells.contains(MapCoordinate(row: bridge.row, col: bridge.col - 1))
+        let count = (n ? 1 : 0) + (e ? 1 : 0) + (s ? 1 : 0) + (w ? 1 : 0)
+        guard count == 2 else { return nil }
+        if n && e { return .ne }
+        if e && s { return .se }
+        if s && w { return .sw }
+        if w && n { return .nw }
+        return nil
+    }
+
+    private func firstMaterialRecursive(_ node: SCNNode) -> SCNMaterial? {
+        if let mat = node.geometry?.firstMaterial { return mat }
+        for child in node.childNodes {
+            if let mat = firstMaterialRecursive(child) { return mat }
+        }
+        return nil
+    }
+
+    private func addWallDiagonalConnectors(
+        to node: SCNNode,
+        wallCells: Set<MapCoordinate>,
+        focusCells: Set<MapCoordinate>? = nil,
+        color: NSColor,
+        alpha: CGFloat = 1.0,
+        templateForHeight: SCNNode,
+        useWallTexture: Bool = false,
+        stepsTemplate: SCNNode? = nil
+    ) -> Int {
+        guard !wallCells.isEmpty else { return 0 }
+        let _ = stepsTemplate
+        var created = 0
+        var createdBridgeCells: Set<MapCoordinate> = []
+        var diagonalPairsDetected = 0
+        var skippedBridgeOccupied = 0
+        let h = wallCubeHeightFromTemplate(templateForHeight)
+        let connectorSize = min(cellSizeW, cellSizeH)
+        let wallMaterialTemplate = useWallTexture ? firstMaterialRecursive(templateForHeight) : nil
+        func cornerName(_ corner: TriangleCorner) -> String {
+            switch corner {
+            case .nw: return "nw"
+            case .ne: return "ne"
+            case .sw: return "sw"
+            case .se: return "se"
+            }
+        }
+        for cell in wallCells {
+            let r = cell.row
+            let c = cell.col
+
+            // NW-SE dijagonala: (r,c) i (r+1,c+1), trokuti u (r,c+1) i (r+1,c)
+            let se = MapCoordinate(row: r + 1, col: c + 1)
+            if wallCells.contains(se) {
+                diagonalPairsDetected += 1
+                if focusCells == nil || focusCells!.contains(cell) || focusCells!.contains(se) {
+                    let b1 = MapCoordinate(row: r, col: c + 1)
+                    let b2 = MapCoordinate(row: r + 1, col: c)
+                    if wallCells.contains(b1) { skippedBridgeOccupied += 1 }
+                    if wallCells.contains(b2) { skippedBridgeOccupied += 1 }
+                    if !createdBridgeCells.contains(b1), !wallCells.contains(b1) {
+                        let p = worldPositionAtCell(row: b1.row, col: b1.col)
+                        guard let corner = outwardCorner(for: b1, wallCells: wallCells) else { continue }
+                        let tri: SCNNode
+                        if let stepsTemplate {
+                            tri = stepsTemplate.clone()
+                            duplicateMaterialsRecursive(tri)
+                            var (minB, maxB) = tri.boundingBox
+                            let currentHeight = max(0.001, CGFloat(maxB.y - minB.y))
+                            let scaleY = h / currentHeight
+                            tri.scale = SCNVector3(1, scaleY, 1)
+                            (minB, maxB) = tri.boundingBox
+                            let y = max(groundLevelY, -CGFloat(minB.y)) + 0.5
+                            tri.position = SCNVector3(p.x, y, p.z)
+                            tri.eulerAngles.y = stepsRotation(for: corner)
+                            _ = Steps.reapplyTexture(to: tri, bundle: .main)
+                            if alpha < 1 {
+                                applyGhostColorRecursive(tri, color: color, transparency: alpha)
+                            } else {
+                                applyTransparencyRecursive(alpha, to: tri)
+                            }
+                        } else {
+                            tri = makeRightTrianglePrismNode(corner: corner, size: connectorSize, height: h, color: color, alpha: alpha)
+                            if let source = wallMaterialTemplate?.copy() as? SCNMaterial {
+                                source.transparency = alpha
+                                source.isDoubleSided = true
+                                tri.geometry?.materials = [source]
+                            }
+                            tri.position = SCNVector3(p.x, groundLevelY + 0.5, p.z)
+                        }
+                        tri.name = "wall_diag_tri_\(cornerName(corner))"
+                        tri.renderingOrder = 10
+                        tri.categoryBitMask = 0
+                        placementDebug("connector create corner=\(cornerName(corner)) at=(\(b1.row),\(b1.col))")
+                        node.addChildNode(tri)
+                        createdBridgeCells.insert(b1)
+                        created += 1
+                    }
+                    if !createdBridgeCells.contains(b2), !wallCells.contains(b2) {
+                        let p = worldPositionAtCell(row: b2.row, col: b2.col)
+                        guard let corner = outwardCorner(for: b2, wallCells: wallCells) else { continue }
+                        let tri: SCNNode
+                        if let stepsTemplate {
+                            tri = stepsTemplate.clone()
+                            duplicateMaterialsRecursive(tri)
+                            var (minB, maxB) = tri.boundingBox
+                            let currentHeight = max(0.001, CGFloat(maxB.y - minB.y))
+                            let scaleY = h / currentHeight
+                            tri.scale = SCNVector3(1, scaleY, 1)
+                            (minB, maxB) = tri.boundingBox
+                            let y = max(groundLevelY, -CGFloat(minB.y)) + 0.5
+                            tri.position = SCNVector3(p.x, y, p.z)
+                            tri.eulerAngles.y = stepsRotation(for: corner)
+                            _ = Steps.reapplyTexture(to: tri, bundle: .main)
+                            if alpha < 1 {
+                                applyGhostColorRecursive(tri, color: color, transparency: alpha)
+                            } else {
+                                applyTransparencyRecursive(alpha, to: tri)
+                            }
+                        } else {
+                            tri = makeRightTrianglePrismNode(corner: corner, size: connectorSize, height: h, color: color, alpha: alpha)
+                            if let source = wallMaterialTemplate?.copy() as? SCNMaterial {
+                                source.transparency = alpha
+                                source.isDoubleSided = true
+                                tri.geometry?.materials = [source]
+                            }
+                            tri.position = SCNVector3(p.x, groundLevelY + 0.5, p.z)
+                        }
+                        tri.name = "wall_diag_tri_\(cornerName(corner))"
+                        tri.renderingOrder = 10
+                        tri.categoryBitMask = 0
+                        placementDebug("connector create corner=\(cornerName(corner)) at=(\(b2.row),\(b2.col))")
+                        node.addChildNode(tri)
+                        createdBridgeCells.insert(b2)
+                        created += 1
+                    }
+                }
+            }
+
+            // NE-SW dijagonala: (r,c) i (r+1,c-1), trokuti u (r,c-1) i (r+1,c)
+            let sw = MapCoordinate(row: r + 1, col: c - 1)
+            if wallCells.contains(sw) {
+                diagonalPairsDetected += 1
+                if focusCells == nil || focusCells!.contains(cell) || focusCells!.contains(sw) {
+                    let b1 = MapCoordinate(row: r, col: c - 1)
+                    let b2 = MapCoordinate(row: r + 1, col: c)
+                    if wallCells.contains(b1) { skippedBridgeOccupied += 1 }
+                    if wallCells.contains(b2) { skippedBridgeOccupied += 1 }
+                    if !createdBridgeCells.contains(b1), !wallCells.contains(b1) {
+                        let p = worldPositionAtCell(row: b1.row, col: b1.col)
+                        guard let corner = outwardCorner(for: b1, wallCells: wallCells) else { continue }
+                        let tri: SCNNode
+                        if let stepsTemplate {
+                            tri = stepsTemplate.clone()
+                            duplicateMaterialsRecursive(tri)
+                            var (minB, maxB) = tri.boundingBox
+                            let currentHeight = max(0.001, CGFloat(maxB.y - minB.y))
+                            let scaleY = h / currentHeight
+                            tri.scale = SCNVector3(1, scaleY, 1)
+                            (minB, maxB) = tri.boundingBox
+                            let y = max(groundLevelY, -CGFloat(minB.y)) + 0.5
+                            tri.position = SCNVector3(p.x, y, p.z)
+                            tri.eulerAngles.y = stepsRotation(for: corner)
+                            _ = Steps.reapplyTexture(to: tri, bundle: .main)
+                            if alpha < 1 {
+                                applyGhostColorRecursive(tri, color: color, transparency: alpha)
+                            } else {
+                                applyTransparencyRecursive(alpha, to: tri)
+                            }
+                        } else {
+                            tri = makeRightTrianglePrismNode(corner: corner, size: connectorSize, height: h, color: color, alpha: alpha)
+                            if let source = wallMaterialTemplate?.copy() as? SCNMaterial {
+                                source.transparency = alpha
+                                source.isDoubleSided = true
+                                tri.geometry?.materials = [source]
+                            }
+                            tri.position = SCNVector3(p.x, groundLevelY + 0.5, p.z)
+                        }
+                        tri.name = "wall_diag_tri_\(cornerName(corner))"
+                        tri.renderingOrder = 10
+                        tri.categoryBitMask = 0
+                        placementDebug("connector create corner=\(cornerName(corner)) at=(\(b1.row),\(b1.col))")
+                        node.addChildNode(tri)
+                        createdBridgeCells.insert(b1)
+                        created += 1
+                    }
+                    if !createdBridgeCells.contains(b2), !wallCells.contains(b2) {
+                        let p = worldPositionAtCell(row: b2.row, col: b2.col)
+                        guard let corner = outwardCorner(for: b2, wallCells: wallCells) else { continue }
+                        let tri: SCNNode
+                        if let stepsTemplate {
+                            tri = stepsTemplate.clone()
+                            duplicateMaterialsRecursive(tri)
+                            var (minB, maxB) = tri.boundingBox
+                            let currentHeight = max(0.001, CGFloat(maxB.y - minB.y))
+                            let scaleY = h / currentHeight
+                            tri.scale = SCNVector3(1, scaleY, 1)
+                            (minB, maxB) = tri.boundingBox
+                            let y = max(groundLevelY, -CGFloat(minB.y)) + 0.5
+                            tri.position = SCNVector3(p.x, y, p.z)
+                            tri.eulerAngles.y = stepsRotation(for: corner)
+                            _ = Steps.reapplyTexture(to: tri, bundle: .main)
+                            if alpha < 1 {
+                                applyGhostColorRecursive(tri, color: color, transparency: alpha)
+                            } else {
+                                applyTransparencyRecursive(alpha, to: tri)
+                            }
+                        } else {
+                            tri = makeRightTrianglePrismNode(corner: corner, size: connectorSize, height: h, color: color, alpha: alpha)
+                            if let source = wallMaterialTemplate?.copy() as? SCNMaterial {
+                                source.transparency = alpha
+                                source.isDoubleSided = true
+                                tri.geometry?.materials = [source]
+                            }
+                            tri.position = SCNVector3(p.x, groundLevelY + 0.5, p.z)
+                        }
+                        tri.name = "wall_diag_tri_\(cornerName(corner))"
+                        tri.renderingOrder = 10
+                        tri.categoryBitMask = 0
+                        placementDebug("connector create corner=\(cornerName(corner)) at=(\(b2.row),\(b2.col))")
+                        node.addChildNode(tri)
+                        createdBridgeCells.insert(b2)
+                        created += 1
+                    }
+                }
+            }
+        }
+        if focusCells != nil {
+            placementDebug("wall preview connectors: diagonalPairs=\(diagonalPairsDetected) created=\(created) skippedBridgeOccupied=\(skippedBridgeOccupied)")
+        }
+        return created
+    }
+
+    private func applyAdaptiveWallShape(_ instance: SCNNode, row: Int, col: Int, wallCells: Set<MapCoordinate>) -> (offsetX: CGFloat, offsetZ: CGFloat) {
+        // Zidne kocke ostaju netaknute; diagonalni spoj se radi dodatnim trokutima.
+        return (0, 0)
+    }
+
+    private func addVerticalWallSideSteps(
+        to node: SCNNode,
+        row: Int,
+        col: Int,
+        wallCells: Set<MapCoordinate>,
+        stepsTemplate: SCNNode,
+        alpha: CGFloat,
+        ghostColor: NSColor? = nil
+    ) {
+        let hasNorth = wallCells.contains(MapCoordinate(row: row - 1, col: col))
+        let hasSouth = wallCells.contains(MapCoordinate(row: row + 1, col: col))
+        guard hasNorth || hasSouth else { return }
+
+        let sides: [(dc: Int, rotY: CGFloat, name: String)] = [
+            (-1, .pi / 2, "wall_steps_side_w"),
+            (1, -.pi / 2, "wall_steps_side_e"),
+        ]
+
+        for side in sides {
+            let sideCell = MapCoordinate(row: row, col: col + side.dc)
+            // Ako je bočna ćelija već zid, preskoči da nema vizualnog preklapanja.
+            if wallCells.contains(sideCell) { continue }
+            let pos = worldPositionAtCell(row: sideCell.row, col: sideCell.col)
+            let instance = stepsTemplate.clone()
+            duplicateMaterialsRecursive(instance)
+            var (minB, _) = instance.boundingBox
+            let y = max(groundLevelY, -CGFloat(minB.y))
+            instance.position = SCNVector3(pos.x, y, pos.z)
+            instance.eulerAngles.y = side.rotY
+            instance.name = side.name
+            instance.categoryBitMask = 0
+            instance.childNodes.forEach { $0.categoryBitMask = 0 }
+            applyTransparencyRecursive(alpha, to: instance)
+            if let ghostColor {
+                applyGhostColorRecursive(instance, color: ghostColor, transparency: alpha)
+            }
+            node.addChildNode(instance)
+        }
+    }
+
+    private func addPlacementNode(for p: Placement, to node: SCNNode, templates: [String: SCNNode], fallback: SCNNode, wallCells: Set<MapCoordinate>) {
+        guard let config = SceneKitPlacementRegistry.config(for: p.objectId) else {
+            addFallbackBoxes(for: p, to: node, fallback: fallback)
+            return
+        }
+        guard let template = templates[p.objectId]?.clone(), !template.childNodes.isEmpty else {
+            addFallbackBoxes(for: p, to: node, fallback: fallback)
+            return
+        }
+        template.isHidden = false
+        template.categoryBitMask = 0
+        template.childNodes.forEach { $0.categoryBitMask = 0; $0.isHidden = false }
+        if config.cellW == 1 && config.cellH == 1 {
+            for r in p.row..<(p.row + p.height) {
+                for c in p.col..<(p.col + p.width) {
+                    let pos = worldPositionAtCell(row: r, col: c)
+                    let instance = template.clone()
+                    var (minB, _) = instance.boundingBox
+                    let placeY = max(groundLevelY, -CGFloat(minB.y))
+                    let wallShift: (offsetX: CGFloat, offsetZ: CGFloat) = p.objectId == Wall.objectId
+                        ? applyAdaptiveWallShape(instance, row: r, col: c, wallCells: wallCells)
+                        : (offsetX: 0, offsetZ: 0)
+                    instance.position = SCNVector3(pos.x + wallShift.offsetX, placeY, pos.z + wallShift.offsetZ)
+                    _ = SceneKitPlacementRegistry.reapplyTexture(objectId: p.objectId, to: instance, bundle: .main)
+                    node.addChildNode(instance)
+                    if p.objectId == Wall.objectId {
+                        var (mn, mx) = instance.boundingBox
+                        let finalHeight = CGFloat(mx.y - mn.y)
+                        placementDebug("render Wall instance row=\(r) col=\(c) placeY=\(String(format: "%.2f", placeY)) finalHeight=\(String(format: "%.3f", finalHeight)) bboxY=[\(String(format: "%.3f", CGFloat(mn.y))),\(String(format: "%.3f", CGFloat(mx.y)))]")
+                    }
+                }
+            }
+        } else {
+            let centerRow = p.row + p.height / 2
+            let centerCol = p.col + p.width / 2
+            let pos = worldPositionAtCell(row: centerRow, col: centerCol)
+            var (minB, _) = template.boundingBox
+            let placeY = max(groundLevelY, -CGFloat(minB.y) + config.yOffset)
+            template.position = SCNVector3(pos.x, placeY, pos.z)
+            _ = SceneKitPlacementRegistry.reapplyTexture(objectId: p.objectId, to: template, bundle: .main)
+            node.addChildNode(template)
+        }
+    }
+
     private func refreshPlacements(_ node: SCNNode?, placements: [Placement], templates: [String: SCNNode]) {
         guard let node = node else { return }
         node.childNodes.forEach { $0.removeFromParentNode() }
         node.isHidden = false
         let boxFallback = makePlacementBoxNode()
         boxFallback.categoryBitMask = 0
+        let wallCells = wallCellsSet(from: placements)
         for p in placements {
-            guard let config = SceneKitPlacementRegistry.config(for: p.objectId) else {
-                addFallbackBoxes(for: p, to: node, fallback: boxFallback)
-                continue
-            }
-            if let template = templates[p.objectId]?.clone(), !template.childNodes.isEmpty {
-                template.isHidden = false
-                template.categoryBitMask = 0
-                template.childNodes.forEach { $0.categoryBitMask = 0; $0.isHidden = false }
-                if config.cellW == 1 && config.cellH == 1 {
-                    for r in p.row..<(p.row + p.height) {
-                        for c in p.col..<(p.col + p.width) {
-                            let pos = worldPositionAtCell(row: r, col: c)
-                            let instance = template.clone()
-                            var (minB, _) = instance.boundingBox
-                            instance.position = SCNVector3(pos.x, -CGFloat(minB.y), pos.z)
-                            _ = SceneKitPlacementRegistry.reapplyTexture(objectId: p.objectId, to: instance, bundle: .main)
-                            node.addChildNode(instance)
-                        }
-                    }
-                } else {
-                    let centerRow = p.row + p.height / 2
-                    let centerCol = p.col + p.width / 2
-                    let pos = worldPositionAtCell(row: centerRow, col: centerCol)
-                    var (minB, _) = template.boundingBox
-                    template.position = SCNVector3(pos.x, -CGFloat(minB.y) + config.yOffset, pos.z)
-                    _ = SceneKitPlacementRegistry.reapplyTexture(objectId: p.objectId, to: template, bundle: .main)
-                    node.addChildNode(template)
-                }
-            } else {
-                addFallbackBoxes(for: p, to: node, fallback: boxFallback)
+            addPlacementNode(for: p, to: node, templates: templates, fallback: boxFallback, wallCells: wallCells)
+        }
+        if let wallTemplate = templates[Wall.objectId], hasAnyDiagonalAdjacency(wallCells) {
+            let count = addWallDiagonalConnectors(
+                to: node,
+                wallCells: wallCells,
+                focusCells: nil,
+                color: NSColor(red: 0.45, green: 0.32, blue: 0.22, alpha: 1),
+                alpha: 1.0,
+                templateForHeight: wallTemplate,
+                useWallTexture: true,
+                stepsTemplate: templates[Steps.objectId]
+            )
+            if count > 0 {
+                placementDebug("wall diagonal connectors created: \(count)")
             }
         }
     }
 
+    private func refreshWallLinePreview(_ node: SCNNode?, cells: [(Int, Int)], templates: [String: SCNNode], existingWallCells: Set<MapCoordinate>) {
+        guard let node = node else { return }
+        node.childNodes.forEach { $0.removeFromParentNode() }
+        guard !cells.isEmpty,
+              let template = templates[Wall.objectId],
+              let config = SceneKitPlacementRegistry.config(for: Wall.objectId) else { return }
+        let previewSet = Set(cells.map { MapCoordinate(row: $0.0, col: $0.1) })
+        let allWallCells = existingWallCells.union(previewSet)
+        placementDebug("wall preview update: dragCells=\(cells.count) uniquePreview=\(previewSet.count) existing=\(existingWallCells.count) total=\(allWallCells.count)")
+        let ghostColor = NSColor(red: 0.15, green: 0.95, blue: 0.25, alpha: 1)
+        let slopedLine = isWallLineSloped(cells)
+        let slopedByExisting = hasDiagonalAdjacency(in: allWallCells, involving: previewSet)
+        let sloped = slopedLine || slopedByExisting
+        placementDebug("wall preview slope detection: line=\(slopedLine) existing=\(slopedByExisting) active=\(sloped)")
+        for (row, col) in cells {
+            let instance = template.clone()
+            duplicateMaterialsRecursive(instance)
+            var (minB, _) = instance.boundingBox
+            let pos = worldPositionAtCell(row: row, col: col)
+            let y = max(groundLevelY, -CGFloat(minB.y) + config.yOffset)
+            let wallShift = applyAdaptiveWallShape(instance, row: row, col: col, wallCells: allWallCells)
+            applyGhostColorRecursive(instance, color: ghostColor, transparency: 0.55)
+            instance.position = SCNVector3(pos.x + wallShift.offsetX, y, pos.z + wallShift.offsetZ)
+            instance.categoryBitMask = 0
+            instance.childNodes.forEach { $0.categoryBitMask = 0 }
+            node.addChildNode(instance)
+        }
+        guard sloped else {
+            placementDebug("wall preview render result: connectorNodes=0 (inactive: line is straight)")
+            return
+        }
+        let created = addWallDiagonalConnectors(
+            to: node,
+            wallCells: allWallCells,
+            focusCells: previewSet,
+            color: ghostColor,
+            alpha: 0.55,
+            templateForHeight: template,
+            useWallTexture: true,
+            stepsTemplate: templates[Steps.objectId]
+        )
+        placementDebug("wall preview render result: connectorNodes=\(created)")
+    }
+
     private func addFallbackBoxes(for p: Placement, to node: SCNNode, fallback: SCNNode) {
+        let fallbackHeight: CGFloat = 8
         for r in p.row..<(p.row + p.height) {
             for c in p.col..<(p.col + p.width) {
                 let pos = worldPositionAtCell(row: r, col: c)
                 let n = fallback.clone()
-                n.position = pos
+                let y = max(groundLevelY, groundLevelY + fallbackHeight / 2)
+                n.position = SCNVector3(pos.x, y, pos.z)
                 n.isHidden = false
                 n.categoryBitMask = 0
                 node.addChildNode(n)
@@ -992,9 +1619,28 @@ struct SceneKitMapView: NSViewRepresentable {
         var (minB, maxB) = templateContainer.boundingBox
         let dx = max(CGFloat(maxB.x - minB.x), 0.1)
         let dz = max(CGFloat(maxB.z - minB.z), 0.1)
+        let dy = max(CGFloat(maxB.y - minB.y), 0.01)
         let scaleX = (cw * cellSizeW) / dx
         let scaleZ = (ch * cellSizeH) / dz
-        let scaleY = min(scaleX, scaleZ)
+        let scaleY: CGFloat
+        if config.objectId == Wall.objectId {
+            // Wall je već modeliran u točnoj world skali (40x400x40), bez dodatnog scale-a.
+            placementNode.scale = SCNVector3(1, 1, 1)
+            if config.objectId == Wall.objectId {
+                let finalHeight = dy
+                placementDebug("template Wall source(dx=\(String(format: "%.3f", dx)),dy=\(String(format: "%.3f", dy)),dz=\(String(format: "%.3f", dz))) scale(x=1.000,y=1.000,z=1.000) finalHeight=\(String(format: "%.3f", finalHeight))")
+            }
+            let ghostNode = templateContainer.clone()
+            duplicateMaterialsRecursive(ghostNode)
+            ghostNode.name = "ghost_\(config.objectId)"
+            ghostNode.isHidden = true
+            ghostNode.categoryBitMask = 0
+            ghostNode.childNodes.forEach { $0.categoryBitMask = 0 }
+            applyTransparencyRecursive(0.6, to: ghostNode)
+            return (templateContainer, ghostNode)
+        } else {
+            scaleY = min(scaleX, scaleZ)
+        }
         placementNode.scale = SCNVector3(scaleX, scaleY, scaleZ)
         let ghostNode = templateContainer.clone()
         duplicateMaterialsRecursive(ghostNode)
@@ -1020,10 +1666,13 @@ struct SceneKitMapView: NSViewRepresentable {
         var cameraTarget: SCNNode?
         var pivotIndicatorNode: SCNNode?
         var gridNode: SCNNode?
+        var wallLinePreviewNode: SCNNode?
+        fileprivate weak var mapViewContainer: SceneKitMapNSView?
         /// Template po objectId – za kloniranje pri refreshPlacements.
         var placementTemplates: [String: SCNNode] = [:]
         /// Ghost čvor po objectId – prikazuje se pri pomicanju miša kad je objekt odabran.
         var ghostNodes: [String: SCNNode] = [:]
+        var lastGhostCellByObject: [String: (Int, Int)] = [:]
         var lastGridZoom: CGFloat = 1
         weak var gameState: GameState?
         /// Glatka animacija: interpolira se prema target zoomu (iz gameState).
@@ -1053,6 +1702,9 @@ struct SceneKitMapView: NSViewRepresentable {
                 h,
                 pan.y + cos(r) * orbitRadius
             )
+            if gameState?.selectedPlacementObjectId != nil {
+                mapViewContainer?.updateGhostFromCurrentMouseLocation()
+            }
         }
     }
 

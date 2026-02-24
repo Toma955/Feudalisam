@@ -28,6 +28,14 @@
 - **Core/AI/** – AILordProfile, AILordProfileStore, ComputerLordAI, GameSituationSnapshot
 - **Core/Realms/** – Realm, RealmGroup
 
+## Važno – ne dirati
+- **Core/Objects/Castle/Wall/** – **NIKAD NE DIRATI.** Wall.swift, Wall.obj, Wall.mtl, Wall_texture.png ostaju netaknuti. Ni jedan commit ne smije mijenjati Wall.
+
+## Trenutni fokus (samo Stepenice)
+- **Samo:** objekt **Stepenice** (object_stepenice) koji se aktivira kad se u Dvoru klikne **Stepenice** (castle_steps).
+- Gumb Stepenice postavlja `selectedPlacementObjectId = Stepenice.objectId` (ContentView). Zid (Wall) se aktivira isključivo gumbom Zid.
+- Ne dirati Wall; sve izmjene samo za Stepenice ili opću logiku (ghost, placement).
+
 ## Resursi
 - **Assets.xcassets** – ikone (castle, sword, farm, food), AppIcon, AccentColor
 - **Core/Objects/Castle/Wall/** – Wall.obj, Wall.mtl, Wall_texture.png (model zida)

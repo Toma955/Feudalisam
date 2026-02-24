@@ -8,16 +8,9 @@
 import SwiftUI
 import AppKit
 
-/// Učita NSImage za ikonu donjeg bara: prvo Assets.xcassets, pa Icons/icons u bundleu.
+/// Učita NSImage za ikonu donjeg bara (cacheirano). Prvo Assets.xcassets, pa Icons/icons u bundleu.
 func loadBarIcon(named name: String) -> NSImage? {
-    if let img = NSImage(named: name) { return img }
-    let subdirs = ["Icons", "icons", "Feudalism/Icons", "Feudalism/icons"]
-    for sub in subdirs {
-        if let url = Bundle.main.url(forResource: name, withExtension: "png", subdirectory: sub) {
-            return NSImage(contentsOf: url)
-        }
-    }
-    return nil
+    BarIconCache.shared.image(named: name, bundle: .main)
 }
 
 /// Ikona za donji bar: asset (castle, wall, sword, …) ili SF Symbol.
@@ -26,7 +19,7 @@ struct BarIconView: View {
     let systemName: String
     /// Veličina ikone u pt; zadano 48.
     var size: CGFloat = 48
-    private var image: NSImage? { loadBarIcon(named: assetName) }
+    private var image: NSImage? { BarIconCache.shared.image(named: assetName, bundle: .main) }
 
     var body: some View {
         Group {

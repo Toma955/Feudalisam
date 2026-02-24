@@ -11,7 +11,7 @@ import AppKit
 import SceneKit
 
 /// Mlin (vjetrenjača) – objekt koji se gradi na karti. 3D model u Core/Objects/Food/Windmill/.
-enum Windmill {
+enum Windmill: PlaceableSceneKitObject {
     /// Stabilan id tipa (za placement na mapi).
     static let objectId = "object_windmill"
 
@@ -40,12 +40,23 @@ enum Windmill {
 
     /// URL 3D modela (.obj) u bundleu.
     static func modelURL(in bundle: Bundle = .main) -> URL? {
-        if let url = bundle.url(forResource: modelAssetName, withExtension: "obj", subdirectory: modelSubdirectory) {
-            return url
+        let namesToTry = [modelAssetName, "Windmill"]
+        for name in namesToTry {
+            if let url = bundle.url(forResource: name, withExtension: "obj", subdirectory: modelSubdirectory) { return url }
+            if let url = bundle.url(forResource: name, withExtension: "obj", subdirectory: "Food/Windmill") { return url }
+            if let url = bundle.url(forResource: name, withExtension: "obj", subdirectory: "Windmill") { return url }
+            if let url = bundle.url(forResource: name, withExtension: "obj") { return url }
         }
-        return bundle.url(forResource: modelAssetName, withExtension: "obj", subdirectory: "Food/Windmill")
-            ?? bundle.url(forResource: modelAssetName, withExtension: "obj", subdirectory: "Windmill")
-            ?? bundle.url(forResource: modelAssetName, withExtension: "obj")
+        // Fallback: direktna putanja u app bundleu (Copy phase stavlja u Core/Objects/Food/Windmill i Windmill)
+        if let base = bundle.resourceURL {
+            for name in namesToTry {
+                for rel in ["Core/Objects/Food/Windmill/\(name).obj", "Food/Windmill/\(name).obj", "Windmill/\(name).obj", "\(name).obj"] {
+                    let full = base.appendingPathComponent(rel)
+                    if (try? full.checkResourceIsReachable()) == true { return full }
+                }
+            }
+        }
+        return nil
     }
 
     private static let textureSubdirectories: [String?] = [

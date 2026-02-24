@@ -11,7 +11,7 @@ import AppKit
 import SceneKit
 
 /// Hotel – objekt koji se gradi na karti. Kategorija: dvorac (House button).
-enum Hotel {
+enum Hotel: PlaceableSceneKitObject {
     static let objectId = "object_hotel"
     static let displayCode = "H"
 

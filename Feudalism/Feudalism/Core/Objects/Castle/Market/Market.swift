@@ -11,7 +11,7 @@ import AppKit
 import SceneKit
 
 /// Tržnica – objekt koji se gradi na karti. 3D model u Core/Objects/Castle/Market/.
-enum Market {
+enum Market: PlaceableSceneKitObject {
     /// Stabilan id tipa (za placement na mapi).
     static let objectId = "object_market"
 

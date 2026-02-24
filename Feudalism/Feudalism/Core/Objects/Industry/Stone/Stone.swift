@@ -11,7 +11,7 @@ import AppKit
 import SceneKit
 
 /// Kamenolom (stone) – objekt koji se gradi na karti. Kategorija: industrija (Rudnik).
-enum Stone {
+enum Stone: PlaceableSceneKitObject {
     static let objectId = "object_stone"
     static let displayCode = "K"
 

@@ -11,7 +11,7 @@ import AppKit
 import SceneKit
 
 /// Kukuruz (corn farm) – objekt koji se gradi na karti. Kategorija: farme.
-enum Corn {
+enum Corn: PlaceableSceneKitObject {
     static let objectId = "object_corn"
     static let displayCode = "C"
 

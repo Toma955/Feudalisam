@@ -147,18 +147,6 @@ final class GameState: ObservableObject {
     private var hasRunSoloResourceAnimation = false
     private var soloResourceAnimationWorkItem: DispatchWorkItem?
 
-    private static let inputDeviceKey = "Feudalism.inputDevice"
-    private static let appLanguageKey = "Feudalism.appLanguage"
-    private static let playerProfileNameKey = "Feudalism.playerProfileName"
-    private static let playerEmblemIdKey = "Feudalism.playerEmblemId"
-    private static let showStartupAnimationKey = "Feudalism.showStartupAnimation"
-    private static let showBottomBarLabelsKey = "Feudalism.showBottomBarLabels"
-    private static let playPlacementSoundKey = "Feudalism.playPlacementSound"
-    private static let playBarTransitionSoundKey = "Feudalism.playBarTransitionSound"
-    private static let audioMusicVolumeKey = "Feudalism.audioMusicVolume"
-    private static let audioSoundsVolumeKey = "Feudalism.audioSoundsVolume"
-    private static let audioSpeechVolumeKey = "Feudalism.audioSpeechVolume"
-
     /// Trackpad ili miš – u Postavkama → General; kasnije posebne funkcije po uređaju.
     @Published var inputDevice: InputDevice {
         didSet { UserDefaults.standard.set(inputDevice.rawValue, forKey: Self.inputDeviceKey) }
@@ -299,102 +287,6 @@ final class GameState: ObservableObject {
         playerRealmId = newRealms.first { $0.isPlayerControlled }?.id
     }
 
-    /// Postavi trenutno odabrani objekt na (row, col). Vraća true ako je uspjelo. U igri (ne Map Editor) troši resurse prema BuildCosts.
-    func placeSelectedObjectAt(row: Int, col: Int) -> Bool {
-        placementError = nil
-        guard let objectId = selectedPlacementObjectId else {
-            let msg = "Nije odabran objekt za postavljanje. Prvo odaberi Zid (Dvor → Zid)."
-            placementError = msg
-            return false
-        }
-        if !isMapEditorMode {
-            let cost = BuildCosts.shared.cost(for: objectId)
-            if !BuildCosts.shared.canAfford(objectId: objectId, stone: stone, wood: wood, iron: iron) {
-                placementError = "Nedovoljno resursa. Potrebno: \(cost.stone) kamen, \(cost.wood) drvo, \(cost.iron) željezo."
-                return false
-            }
-        }
-        let obj = ObjectCatalog.shared.object(id: objectId)
-        let width = obj?.size.width ?? 1
-        let height = obj?.size.height ?? 1
-        guard let _ = gameMap.place(objectId: objectId, width: width, height: height, atRow: row, col: col) else {
-            let msg = "Ne može se staviti na (\(row), \(col)) – ćelija zauzeta ili izvan mape \(gameMap.rows)×\(gameMap.cols)."
-            placementError = msg
-            return false
-        }
-        if !isMapEditorMode {
-            let cost = BuildCosts.shared.cost(for: objectId)
-            stone -= cost.stone
-            wood -= cost.wood
-            iron -= cost.iron
-        }
-        placementsVersion += 1
-        objectWillChange.send()
-        if playPlacementSound {
-            AudioManager.shared.playSound(named: "place", volume: audioSoundsVolume)
-        }
-        return true
-    }
-
-    /// Ukloni placement koji pokriva danu koordinatu (Map Editor – alat za brisanje).
-    func removePlacement(at coordinate: MapCoordinate) {
-        guard let p = gameMap.placement(at: coordinate) else { return }
-        gameMap.removePlacement(id: p.id)
-        placementsVersion += 1
-        objectWillChange.send()
-    }
-
-    /// Otvori Map Editor – prazna mapa prema trenutnoj veličini.
-    func openMapEditor() {
-        setMapSize(.size200)
-        selectedPlacementObjectId = nil
-        isShowingMainMenu = false
-        isMapEditorMode = true
-        isLevelReady = false
-        levelLoadingMessage = "Učitavanje mape (\(gameMap.rows)×\(gameMap.cols))…"
-    }
-
-    /// Zatvori Map Editor i vrati se na izbornik.
-    func closeMapEditor() {
-        isMapEditorMode = false
-        isShowingMainMenu = true
-    }
-
-    /// Spremi trenutnu mapu u Application Support (Map Editor). Vraća true ako je uspjelo.
-    func saveEditorMap() -> Bool {
-        let data = MapEditorSaveData(rows: gameMap.rows, cols: gameMap.cols, placements: gameMap.placements)
-        guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("Feudalism", isDirectory: true) else { return false }
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let fileURL = dir.appendingPathComponent("map_editor_save.json")
-        guard let encoded = try? JSONEncoder().encode(data) else { return false }
-        do {
-            try encoded.write(to: fileURL)
-            return true
-        } catch {
-            return false
-        }
-    }
-
-    /// Učitaj mapu iz Application Support (Map Editor). Podržana je samo 100×100. Vraća true ako je uspjelo.
-    func loadEditorMap() -> Bool {
-        guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return false }
-        let fileURL = dir.appendingPathComponent("Feudalism").appendingPathComponent("map_editor_save.json")
-        guard FileManager.default.fileExists(atPath: fileURL.path),
-              let raw = try? Data(contentsOf: fileURL),
-              let data = try? JSONDecoder().decode(MapEditorSaveData.self, from: raw) else { return false }
-        guard data.rows == gameMap.rows, data.cols == gameMap.cols else { return false }
-        gameMap.replacePlacements(data.placements)
-        objectWillChange.send()
-        return true
-    }
-
-    /// Map Editor: obriši sve objekte s mape.
-    func clearEditorMap() {
-        gameMap.replacePlacements([])
-        objectWillChange.send()
-    }
-
     /// Prikaži glavni izbornik (nazad iz igre).
     func showMainMenu() {
         isShowingMainMenu = true
@@ -466,4 +358,127 @@ final class GameState: ObservableObject {
     func setMapSize(_ preset: MapSizePreset) {
         gameMap = preset.makeGameMap()
     }
+}
+
+// MARK: - Placement
+extension GameState {
+    /// Postavi trenutno odabrani objekt na (row, col). Vraća true ako je uspjelo. U igri (ne Map Editor) troši resurse prema BuildCosts.
+    func placeSelectedObjectAt(row: Int, col: Int, playSound: Bool = true) -> Bool {
+        placementError = nil
+        placementDebugLog("GameState.placeSelectedObjectAt row=\(row) col=\(col) selected=\(selectedPlacementObjectId ?? "nil")")
+        guard let objectId = selectedPlacementObjectId else {
+            let msg = "Nije odabran objekt za postavljanje. Prvo odaberi Zid (Dvor → Zid)."
+            placementError = msg
+            placementDebugLog("FAIL no selected object")
+            return false
+        }
+        if !isMapEditorMode {
+            let cost = BuildCosts.shared.cost(for: objectId)
+            if !BuildCosts.shared.canAfford(objectId: objectId, stone: stone, wood: wood, iron: iron) {
+                placementError = "Nedovoljno resursa. Potrebno: \(cost.stone) kamen, \(cost.wood) drvo, \(cost.iron) željezo."
+                placementDebugLog("FAIL insufficient resources object=\(objectId) have(s=\(stone),w=\(wood),i=\(iron)) need(s=\(cost.stone),w=\(cost.wood),i=\(cost.iron))")
+                return false
+            }
+        }
+        let obj = ObjectCatalog.shared.object(id: objectId)
+        let width = obj?.size.width ?? 1
+        let height = obj?.size.height ?? 1
+        placementDebugLog("object=\(objectId) size=\(width)x\(height)")
+        guard let _ = gameMap.place(objectId: objectId, width: width, height: height, atRow: row, col: col) else {
+            let msg = "Ne može se staviti na (\(row), \(col)) – ćelija zauzeta ili izvan mape \(gameMap.rows)×\(gameMap.cols)."
+            placementError = msg
+            placementDebugLog("FAIL map.place returned nil object=\(objectId) row=\(row) col=\(col)")
+            return false
+        }
+        if !isMapEditorMode {
+            let cost = BuildCosts.shared.cost(for: objectId)
+            stone -= cost.stone
+            wood -= cost.wood
+            iron -= cost.iron
+        }
+        placementsVersion += 1
+        objectWillChange.send()
+        if playSound && playPlacementSound {
+            AudioManager.shared.playSound(named: "place", volume: audioSoundsVolume)
+        }
+        placementDebugLog("SUCCESS object=\(objectId) row=\(row) col=\(col)")
+        return true
+    }
+
+    /// Ukloni placement koji pokriva danu koordinatu (Map Editor – alat za brisanje).
+    func removePlacement(at coordinate: MapCoordinate) {
+        guard let p = gameMap.placement(at: coordinate) else { return }
+        gameMap.removePlacement(id: p.id)
+        placementsVersion += 1
+        objectWillChange.send()
+    }
+}
+
+// MARK: - Map Editor
+extension GameState {
+    /// Otvori Map Editor – prazna mapa prema trenutnoj veličini.
+    func openMapEditor() {
+        setMapSize(.size200)
+        selectedPlacementObjectId = nil
+        isShowingMainMenu = false
+        isMapEditorMode = true
+        isLevelReady = false
+        levelLoadingMessage = "Učitavanje mape (\(gameMap.rows)×\(gameMap.cols))…"
+    }
+
+    /// Zatvori Map Editor i vrati se na izbornik.
+    func closeMapEditor() {
+        isMapEditorMode = false
+        isShowingMainMenu = true
+    }
+
+    /// Spremi trenutnu mapu u Application Support (Map Editor). Vraća true ako je uspjelo.
+    func saveEditorMap() -> Bool {
+        let data = MapEditorSaveData(rows: gameMap.rows, cols: gameMap.cols, placements: gameMap.placements)
+        guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("Feudalism", isDirectory: true) else { return false }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fileURL = dir.appendingPathComponent("map_editor_save.json")
+        guard let encoded = try? JSONEncoder().encode(data) else { return false }
+        do {
+            try encoded.write(to: fileURL)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Učitaj mapu iz Application Support (Map Editor). Podržana je samo 100×100. Vraća true ako je uspjelo.
+    func loadEditorMap() -> Bool {
+        guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return false }
+        let fileURL = dir.appendingPathComponent("Feudalism").appendingPathComponent("map_editor_save.json")
+        guard FileManager.default.fileExists(atPath: fileURL.path),
+              let raw = try? Data(contentsOf: fileURL),
+              let data = try? JSONDecoder().decode(MapEditorSaveData.self, from: raw) else { return false }
+        guard data.rows == gameMap.rows, data.cols == gameMap.cols else { return false }
+        gameMap.replacePlacements(data.placements)
+        objectWillChange.send()
+        return true
+    }
+
+    /// Map Editor: obriši sve objekte s mape.
+    func clearEditorMap() {
+        gameMap.replacePlacements([])
+        objectWillChange.send()
+    }
+}
+
+// MARK: - Settings (UserDefaults keys)
+private extension GameState {
+    static let inputDeviceKey = "Feudalism.inputDevice"
+    static let appLanguageKey = "Feudalism.appLanguage"
+    static let playerProfileNameKey = "Feudalism.playerProfileName"
+    static let playerEmblemIdKey = "Feudalism.playerEmblemId"
+    static let showStartupAnimationKey = "Feudalism.showStartupAnimation"
+    static let showBottomBarLabelsKey = "Feudalism.showBottomBarLabels"
+    static let playPlacementSoundKey = "Feudalism.playPlacementSound"
+    static let playBarTransitionSoundKey = "Feudalism.playBarTransitionSound"
+    static let audioMusicVolumeKey = "Feudalism.audioMusicVolume"
+    static let audioSoundsVolumeKey = "Feudalism.audioSoundsVolume"
+    static let audioSpeechVolumeKey = "Feudalism.audioSpeechVolume"
 }

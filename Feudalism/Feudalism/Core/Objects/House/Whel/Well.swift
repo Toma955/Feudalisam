@@ -11,7 +11,7 @@ import AppKit
 import SceneKit
 
 /// Zdenac (well) – objekt koji se gradi na karti. Kategorija: dvorac (House button).
-enum Well {
+enum Well: PlaceableSceneKitObject {
     static let objectId = "object_well"
     static let displayCode = "Z"
 

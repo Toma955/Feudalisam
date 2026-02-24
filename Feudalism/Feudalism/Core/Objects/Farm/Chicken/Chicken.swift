@@ -11,7 +11,7 @@ import AppKit
 import SceneKit
 
 /// Kokošinjac (chicken farm) – objekt koji se gradi na karti. Kategorija: farme.
-enum Chicken {
+enum Chicken: PlaceableSceneKitObject {
     static let objectId = "object_chicken"
     static let displayCode = "K"
 

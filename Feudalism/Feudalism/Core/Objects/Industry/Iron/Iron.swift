@@ -11,7 +11,7 @@ import AppKit
 import SceneKit
 
 /// Željezara (iron) – objekt koji se gradi na karti. Kategorija: industrija (Rudnik).
-enum Iron {
+enum Iron: PlaceableSceneKitObject {
     static let objectId = "object_iron"
     static let displayCode = "Ž"
 
