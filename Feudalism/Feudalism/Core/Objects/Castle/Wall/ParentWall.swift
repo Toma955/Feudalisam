@@ -1,39 +1,27 @@
 //
-//  Wall.swift
+//  ParentWall.swift
 //  Feudalism
 //
-//  Pravi zid: jedan veliki kvadrat (40x40x400).
+//  Zajednička logika za sve tipove zidova (npr. HugeWall, SmallWall).
+//  Nije placeable sam po sebi – koriste ga HugeWall i SmallWall.
 //
 
 import Foundation
 import AppKit
 import SceneKit
 
-enum Wall: PlaceableSceneKitObject {
-    static let objectId = "object_wall"
-    static let displayCode = "W"
-    static let modelAssetName = "Wall"
-
-    static var gameObject: GameObject {
-        GameObject(
-            id: objectId,
-            name: "Wall",
-            category: .ostali,
-            width: 1,
-            height: 1,
-            displayCode: displayCode,
-            modelAssetName: nil
-        )
-    }
-
-    private static let cubeSize: CGFloat = 40
-    private static let wallHeight: CGFloat = 400
+/// Zajednička implementacija zida: geometrija, teksture, materijali.
+/// Razlika između tipova (HugeWall / SmallWall) bit će visina, resursi i život.
+enum ParentWall {
+    static let cubeSize: CGFloat = 40
+    static let defaultWallHeight: CGFloat = 400
     private static let wallColor = NSColor(red: 0.45, green: 0.32, blue: 0.22, alpha: 1)
-    /// Koliko puta se tekstura ponovi po širini i visini zida.
+
     private static let tileU: CGFloat = 1
-    private static let tileV: CGFloat = wallHeight / cubeSize
+    private static func tileV(for height: CGFloat) -> CGFloat { height / cubeSize }
     private static let topTileU: CGFloat = 1
     private static let topTileV: CGFloat = 1
+
     private struct WallTextureSet {
         let baseColor: NSImage?
         let normalGL: NSImage?
@@ -53,13 +41,6 @@ enum Wall: PlaceableSceneKitObject {
         prop.wrapS = .repeat
         prop.wrapT = .repeat
         prop.contentsTransform = SCNMatrix4MakeScale(u, v, 1)
-    }
-
-    static func reapplyTexture(to node: SCNNode, bundle: Bundle = .main) -> Bool {
-        let side = makeWallMaterial(bundle: bundle)
-        let top = makeTopWallMaterial(bundle: bundle)
-        applyWallMaterialRecursive(node, sideMaterial: side, topMaterial: top)
-        return true
     }
 
     private static func textureURL(bundle: Bundle, name: String, subdirs: [String?]) -> URL? {
@@ -156,11 +137,11 @@ enum Wall: PlaceableSceneKitObject {
         return set
     }
 
-    private static func makeWallMaterial(bundle: Bundle = .main) -> SCNMaterial {
+    private static func makeWallMaterial(bundle: Bundle = .main, wallHeight: CGFloat) -> SCNMaterial {
         let textures = loadWallTextureSet(bundle: bundle)
         let mat = SCNMaterial()
         mat.diffuse.contents = textures.baseColor ?? wallColor
-        applyTiling(mat.diffuse, u: tileU, v: tileV)
+        applyTiling(mat.diffuse, u: tileU, v: tileV(for: wallHeight))
         mat.ambient.contents = NSColor.white
         mat.specular.contents = NSColor.darkGray
         mat.isDoubleSided = true
@@ -168,19 +149,19 @@ enum Wall: PlaceableSceneKitObject {
         if let n = textures.normalGL {
             mat.normal.contents = n
             mat.normal.intensity = 1.0
-            applyTiling(mat.normal, u: tileU, v: tileV)
+            applyTiling(mat.normal, u: tileU, v: tileV(for: wallHeight))
         }
         if let r = textures.roughness {
             mat.roughness.contents = r
-            applyTiling(mat.roughness, u: tileU, v: tileV)
+            applyTiling(mat.roughness, u: tileU, v: tileV(for: wallHeight))
         }
         if let ao = textures.ambientOcclusion {
             mat.ambientOcclusion.contents = ao
-            applyTiling(mat.ambientOcclusion, u: tileU, v: tileV)
+            applyTiling(mat.ambientOcclusion, u: tileU, v: tileV(for: wallHeight))
         }
         if let d = textures.displacement {
             mat.displacement.contents = d
-            applyTiling(mat.displacement, u: tileU, v: tileV)
+            applyTiling(mat.displacement, u: tileU, v: tileV(for: wallHeight))
         }
         return mat
     }
@@ -219,12 +200,10 @@ enum Wall: PlaceableSceneKitObject {
             if let box = geo as? SCNBox {
                 let side = sideMaterial.copy() as? SCNMaterial ?? sideMaterial
                 let top = topMaterial.copy() as? SCNMaterial ?? topMaterial
-                // SCNBox materials order: front, right, back, left, top, bottom
                 box.materials = [side, side, side, side, top, side]
             } else if node.name == "steps_prism", geo.elements.count >= 2 {
                 let top = topMaterial.copy() as? SCNMaterial ?? topMaterial
                 let side = sideMaterial.copy() as? SCNMaterial ?? sideMaterial
-                // Steps geometry elements order: [top/bottom, sides]
                 geo.materials = [top, side]
             } else if geo.materials.isEmpty {
                 geo.materials = [sideMaterial.copy() as? SCNMaterial ?? sideMaterial]
@@ -237,11 +216,12 @@ enum Wall: PlaceableSceneKitObject {
         node.childNodes.forEach { applyWallMaterialRecursive($0, sideMaterial: sideMaterial, topMaterial: topMaterial) }
     }
 
-    static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? {
+    /// Učitava 3D čvor zida s danom visinom. Koriste ga HugeWall i SmallWall.
+    static func loadSceneKitNode(from bundle: Bundle = .main, wallHeight: CGFloat = defaultWallHeight) -> SCNNode? {
         let container = SCNNode()
         container.name = "wall"
         let box = SCNBox(width: cubeSize, height: wallHeight, length: cubeSize, chamferRadius: 0)
-        let side = makeWallMaterial(bundle: bundle)
+        let side = makeWallMaterial(bundle: bundle, wallHeight: wallHeight)
         let top = makeTopWallMaterial(bundle: bundle)
         box.materials = [side, side, side, side, top, side]
         let cubeNode = SCNNode(geometry: box)
@@ -250,13 +230,21 @@ enum Wall: PlaceableSceneKitObject {
 
         let (mn, mx) = container.boundingBox
         let sourceHeight = CGFloat(mx.y - mn.y)
-        placementDebugLog("Wall.loadSceneKitNode cubeCount=1 cubeSize=\(String(format: "%.3f", cubeSize)) wallHeight=\(String(format: "%.3f", wallHeight)) sourceHeight=\(String(format: "%.3f", sourceHeight))")
+        placementDebugLog("ParentWall.loadSceneKitNode cubeSize=\(String(format: "%.3f", cubeSize)) wallHeight=\(String(format: "%.3f", wallHeight)) sourceHeight=\(String(format: "%.3f", sourceHeight))")
         return container
     }
 
-    // Ostavljen API kompatibilan poziv iz postojeće aplikacije.
-    static func printTextureDiagnostics(bundle: Bundle = .main) {}
-    static func checkAndLogTextureStatus(bundle: Bundle = .main) -> (success: Bool, message: String) {
-        (true, "Wall koristi proceduralni model (1x40x40x400).")
+    /// Ponovno primjenjuje teksture na čvor (glavni zid ili steps_prism). Koriste HugeWall i Steps.
+    static func reapplyTexture(to node: SCNNode, bundle: Bundle = .main, wallHeight: CGFloat = defaultWallHeight) -> Bool {
+        let side = makeWallMaterial(bundle: bundle, wallHeight: wallHeight)
+        let top = makeTopWallMaterial(bundle: bundle)
+        applyWallMaterialRecursive(node, sideMaterial: side, topMaterial: top)
+        return true
+    }
+
+    /// Visina zida za korištenje u mapi (npr. za scaling dijagonalnih elemenata).
+    static func wallHeight(for objectId: String) -> CGFloat {
+        if objectId == SmallWall.objectId { return 240 }
+        return defaultWallHeight
     }
 }

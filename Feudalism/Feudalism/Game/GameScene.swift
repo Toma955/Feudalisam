@@ -66,7 +66,7 @@ final class GameScene: SKScene {
     private var isRightOrMiddleMousePan = false
     private var lastPanLocation: CGPoint = .zero
 
-    /// Odabrani objekt za postavljanje (npr. Wall.objectId); ghost se prikazuje samo kad je Zid odabran.
+    /// Odabrani objekt za postavljanje (npr. HugeWall.objectId); ghost se prikazuje samo kad je Zid odabran.
     var selectedObjectId: String?
     /// Poziva se kad igrač klikne na ćeliju – (row, col). Koristi za postavljanje zida.
     var onPlaceAt: ((Int, Int) -> Void)?
@@ -459,7 +459,7 @@ final class GameScene: SKScene {
         if handPanMode, !isPanning { NSCursor.openHand.set() }
         let location = event.location(in: self)
         guard let ghost = ghostWallNode, let map = mapNode else { return }
-        let showGhost = !isEraseMode && (selectedObjectId == Wall.objectId) && !handPanMode
+        let showGhost = !isEraseMode && (selectedObjectId == HugeWall.objectId) && !handPanMode
         if showGhost, let (col, row) = cellColRow(at: location) {
             let x = CGFloat(col) * cellSizeW - totalMapW / 2 + cellSizeW / 2
             let y = CGFloat(row) * cellSizeH - totalMapH / 2 + cellSizeH / 2

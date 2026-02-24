@@ -48,7 +48,7 @@ struct MapEditorView: View {
             }
         )
         .onAppear {
-            let (ok, message) = Wall.checkAndLogTextureStatus(bundle: .main)
+            let (ok, message) = HugeWall.checkAndLogTextureStatus(bundle: .main)
             let status = ok ? "Tekstura zida je uspješno učitana i primijenjena." : "Tekstura zida nije učitana: \(message)"
             gameState.wallTextureStatus = ok ? "Tekstura zida: OK" : "Tekstura zida: \(message)"
             textureStatusMessage = status
@@ -111,11 +111,11 @@ struct MapEditorView: View {
 
             Button {
                 eraseMode = false
-                gameState.selectedPlacementObjectId = Wall.objectId
+                gameState.selectedPlacementObjectId = HugeWall.objectId
             } label: {
                 Text("Zid")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(gameState.selectedPlacementObjectId == Wall.objectId && !eraseMode ? .yellow : .white.opacity(0.9))
+                    .foregroundStyle(gameState.selectedPlacementObjectId == HugeWall.objectId && !eraseMode ? .yellow : .white.opacity(0.9))
             }
             .buttonStyle(.plain)
 

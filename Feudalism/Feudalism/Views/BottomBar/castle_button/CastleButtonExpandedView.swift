@@ -10,6 +10,7 @@ import SwiftUI
 struct CastleButtonExpandedView: View {
     @EnvironmentObject private var gameState: GameState
     var onSelectWall: () -> Void
+    var onSelectSmallWall: () -> Void
     var onSelectMarket: () -> Void
     var onSelectArmory: () -> Void
     var onSelectSteps: () -> Void
@@ -24,7 +25,8 @@ struct CastleButtonExpandedView: View {
 
     var body: some View {
         CategoryExpandedView(items: [
-            CategoryExpandedItem(assetName: "wall", systemName: "rectangle.3.group", labelKey: "wall", action: onSelectWall),
+            CategoryExpandedItem(assetName: "wall", systemName: "rectangle.3.group", labelKey: "huge_wall", action: onSelectWall),
+            CategoryExpandedItem(assetName: "wall", systemName: "rectangle.3.group", labelKey: "wall_small", action: onSelectSmallWall),
             CategoryExpandedItem(assetName: "market", systemName: "cart.fill", labelKey: "market", action: onSelectMarket),
             CategoryExpandedItem(assetName: "armory", systemName: "shield.fill", labelKey: "castle_armory", action: onSelectArmory),
             CategoryExpandedItem(assetName: "steps", systemName: "square.stack.3d.up.fill", labelKey: "castle_steps", action: onSelectSteps),

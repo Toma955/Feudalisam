@@ -408,8 +408,12 @@ struct ContentView: View {
             case .castle:
                 CastleButtonExpandedView(
                     onSelectWall: {
-                        placementDebugLog("UI click castle/wall -> \(Wall.objectId)")
-                        gameState.selectedPlacementObjectId = Wall.objectId
+                        placementDebugLog("UI click castle/huge_wall -> \(HugeWall.objectId)")
+                        gameState.selectedPlacementObjectId = HugeWall.objectId
+                    },
+                    onSelectSmallWall: {
+                        placementDebugLog("UI click castle/wall_small -> \(SmallWall.objectId)")
+                        gameState.selectedPlacementObjectId = SmallWall.objectId
                     },
                     onSelectMarket: {
                         placementDebugLog("UI click castle/market -> \(Market.objectId)")
@@ -417,12 +421,12 @@ struct ContentView: View {
                     },
                     onSelectArmory: { /* dvor – uskoro */ },
                     onSelectSteps: {
-                        let targetId = gameState.isSoloMode ? Steps.objectId : Wall.objectId
+                        let targetId = gameState.isSoloMode ? Steps.objectId : HugeWall.objectId
                         placementDebugLog("UI click castle/steps -> \(targetId)")
                         gameState.selectedPlacementObjectId = targetId
                     },
                     onSelectStairs: {
-                        let targetId = gameState.isSoloMode ? Steps.objectId : Wall.objectId
+                        let targetId = gameState.isSoloMode ? Steps.objectId : HugeWall.objectId
                         placementDebugLog("UI click castle/stairs -> \(targetId)")
                         gameState.selectedPlacementObjectId = targetId
                     },

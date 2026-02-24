@@ -19,7 +19,8 @@ protocol PlaceableSceneKitObject {
 /// Svi tipovi koji se mogu postaviti na mapu (redoslijed za registry).
 enum PlaceableSceneKitTypes {
     static let all: [PlaceableSceneKitObject.Type] = [
-        Wall.self,
+        HugeWall.self,
+        SmallWall.self,
         Steps.self,
         Market.self,
         Windmill.self,

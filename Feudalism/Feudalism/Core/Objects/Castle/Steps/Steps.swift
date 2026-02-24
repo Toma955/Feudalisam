@@ -102,6 +102,6 @@ enum Steps: PlaceableSceneKitObject {
 
     static func reapplyTexture(to node: SCNNode, bundle: Bundle = .main) -> Bool {
         // Reuse wall material setup for consistent look.
-        Wall.reapplyTexture(to: node, bundle: bundle)
+        HugeWall.reapplyTexture(to: node, bundle: bundle)
     }
 }

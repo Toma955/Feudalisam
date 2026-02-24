@@ -114,7 +114,8 @@ extension ObjectCategory {
             ]
         case .ostali:
             return [
-                Wall.gameObject,
+                HugeWall.gameObject,
+                SmallWall.gameObject,
                 GameObject(name: "Cesta", category: .ostali),
                 GameObject(name: "Most", category: .ostali, width: 2, height: 1)
             ]

@@ -29,14 +29,14 @@ private enum WallPreviewState { static var diagnosticsDone = false }
 private func makeSceneView() -> SCNView {
     if !WallPreviewState.diagnosticsDone {
         WallPreviewState.diagnosticsDone = true
-        Wall.printTextureDiagnostics()
+        HugeWall.printTextureDiagnostics()
     }
     let view = SCNView()
     view.autoenablesDefaultLighting = true
     view.allowsCameraControl = true
     view.backgroundColor = NSColor(white: 0.15, alpha: 1)
     let scene = SCNScene()
-    if let wallNode = Wall.loadSceneKitNode() {
+    if let wallNode = HugeWall.loadSceneKitNode() {
         wallNode.position = SCNVector3(0, 0, 0)
         wallNode.scale = SCNVector3(0.5, 0.5, 0.5)
         scene.rootNode.addChildNode(wallNode)

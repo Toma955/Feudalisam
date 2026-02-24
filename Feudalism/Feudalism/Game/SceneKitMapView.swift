@@ -474,7 +474,7 @@ private final class SceneKitMapNSView: NSView {
             onPlacementError?("Klik nije pogodio teren.")
             return
         }
-        if !isEraseMode, currentSelectedPlacementObjectId == Wall.objectId {
+        if !isEraseMode, let id = currentSelectedPlacementObjectId, WallParent.isWall(objectId: id) {
             wallLineStartCell = (row, col)
             wallLineCells = [(row, col)]
             onWallLinePreview?(wallLineCells)
@@ -743,7 +743,7 @@ struct SceneKitMapView: NSViewRepresentable {
     private func setupPlacementTemplatesAndGhosts(coord: Coordinator, scene: SCNScene, loader: GameAssetLoader) {
         for config in SceneKitPlacementRegistry.allConfigs {
             // Wall uvijek gradimo svježe (bez cachea) da ne ostane stari minijaturni node.
-            let useCache = config.objectId != Wall.objectId
+            let useCache = !WallParent.isWall(objectId: config.objectId)
             let cachedRaw = (loader.isLoaded && useCache) ? loader.cachedPlacementNode(objectId: config.objectId) : nil
             let cachedNode = cachedRaw?.clone()
             let (template, ghost) = makeTemplateAndGhost(config: config, cachedNode: cachedNode)
@@ -831,7 +831,7 @@ struct SceneKitMapView: NSViewRepresentable {
                   let ghost = coord.ghostNodes[objectId],
                   let config = SceneKitPlacementRegistry.config(for: objectId) else { return }
             guard let container else { return }
-            if objectId == Wall.objectId, container.isWallLineActive { return }
+            if WallParent.isWall(objectId: objectId), container.isWallLineActive { return }
             guard let sv = container.scnView, sv.bounds.contains(container.convert(loc, to: sv)) else { return }
             let hitOptions: [SCNHitTestOption: Any] = [.searchMode: SCNHitTestSearchMode.all.rawValue, .categoryBitMask: 1]
             let hits = sv.hitTest(container.convert(loc, to: sv), options: hitOptions)
@@ -847,7 +847,7 @@ struct SceneKitMapView: NSViewRepresentable {
             let y = max(groundLevelY, -CGFloat(minB.y) + config.yOffset)
             ghost.position = SCNVector3(pos.x, y, pos.z)
             ghost.isHidden = false
-            if objectId == Wall.objectId {
+            if WallParent.isWall(objectId: objectId) {
                 let last = coord.lastGhostCellByObject[objectId]
                 if last?.0 != centerRow || last?.1 != centerCol {
                     coord.lastGhostCellByObject[objectId] = (centerRow, centerCol)
@@ -858,18 +858,23 @@ struct SceneKitMapView: NSViewRepresentable {
 
         container.onWallLinePreview = { [gameState] cells in
             let existingWalls = wallCellsSet(from: gameState.gameMap.placements)
+            var wallObjectIds = wallCellToObjectId(from: gameState.gameMap.placements)
+            for (row, col) in cells {
+                wallObjectIds[MapCoordinate(row: row, col: col)] = gameState.selectedPlacementObjectId ?? HugeWall.objectId
+            }
             refreshWallLinePreview(
                 coord.wallLinePreviewNode,
                 cells: cells,
                 templates: coord.placementTemplates,
-                existingWallCells: existingWalls
+                existingWallCells: existingWalls,
+                wallObjectIdPerCell: wallObjectIds
             )
         }
         container.onWallLineCommit = { [gameState, coord] cells in
             guard !cells.isEmpty else { return }
             DispatchQueue.main.async {
-                if gameState.selectedPlacementObjectId != Wall.objectId {
-                    gameState.selectedPlacementObjectId = Wall.objectId
+                if let sid = gameState.selectedPlacementObjectId, !WallParent.isWall(objectId: sid) {
+                    gameState.selectedPlacementObjectId = HugeWall.objectId
                 }
                 var placedAny = false
                 for (row, col) in cells {
@@ -1022,7 +1027,7 @@ struct SceneKitMapView: NSViewRepresentable {
                 refreshGrid(gridNode: grid, zoom: zoom)
             }
         }
-        if selectedId != Wall.objectId {
+        if let sid = selectedId, !WallParent.isWall(objectId: sid) {
             coord.wallLinePreviewNode?.childNodes.forEach { $0.removeFromParentNode() }
         }
         // Ne osvježavaj placements ovdje – inače se pri svakom updateNSView (rotacija, zoom) cijela scena zidova gradi iznova (39 MB .obj + reapplyTexture) → pad FPS. Osvježavanje samo u onClick (place) i nakon onRemoveAt (erase).
@@ -1075,10 +1080,19 @@ struct SceneKitMapView: NSViewRepresentable {
 
     private func wallCellsSet(from placements: [Placement]) -> Set<MapCoordinate> {
         var set: Set<MapCoordinate> = []
-        for p in placements where p.objectId == Wall.objectId {
+        for p in placements where WallParent.isWall(objectId: p.objectId) {
             for c in p.coveredCoordinates() { set.insert(c) }
         }
         return set
+    }
+
+    /// Mapa ćelija zida → objectId (za visinu trokutastih spojnica: mali zid = 240, veliki = 400).
+    private func wallCellToObjectId(from placements: [Placement]) -> [MapCoordinate: String] {
+        var map: [MapCoordinate: String] = [:]
+        for p in placements where WallParent.isWall(objectId: p.objectId) {
+            for c in p.coveredCoordinates() { map[c] = p.objectId }
+        }
+        return map
     }
 
     private enum TriangleCorner {
@@ -1215,7 +1229,9 @@ struct SceneKitMapView: NSViewRepresentable {
         alpha: CGFloat = 1.0,
         templateForHeight: SCNNode,
         useWallTexture: Bool = false,
-        stepsTemplate: SCNNode? = nil
+        stepsTemplate: SCNNode? = nil,
+        wallObjectIdPerCell: [MapCoordinate: String]? = nil,
+        smallWallTemplate: SCNNode? = nil
     ) -> Int {
         guard !wallCells.isEmpty else { return 0 }
         let _ = stepsTemplate
@@ -1223,9 +1239,18 @@ struct SceneKitMapView: NSViewRepresentable {
         var createdBridgeCells: Set<MapCoordinate> = []
         var diagonalPairsDetected = 0
         var skippedBridgeOccupied = 0
-        let h = wallCubeHeightFromTemplate(templateForHeight)
+        let defaultH = wallCubeHeightFromTemplate(templateForHeight)
         let connectorSize = min(cellSizeW, cellSizeH)
-        let wallMaterialTemplate = useWallTexture ? firstMaterialRecursive(templateForHeight) : nil
+        func heightForCell(_ cell: MapCoordinate) -> CGFloat {
+            guard let ids = wallObjectIdPerCell, let id = ids[cell] else { return defaultH }
+            return ParentWall.wallHeight(for: id)
+        }
+        func templateAndHeightForConnector(cell1: MapCoordinate, cell2: MapCoordinate) -> (template: SCNNode, h: CGFloat) {
+            let h = max(heightForCell(cell1), heightForCell(cell2))
+            let useSmall = h <= 250
+            let template = (useSmall && smallWallTemplate != nil) ? smallWallTemplate! : templateForHeight
+            return (template, h)
+        }
         func cornerName(_ corner: TriangleCorner) -> String {
             switch corner {
             case .nw: return "nw"
@@ -1247,6 +1272,7 @@ struct SceneKitMapView: NSViewRepresentable {
                     let b2 = MapCoordinate(row: r + 1, col: c)
                     if wallCells.contains(b1) { skippedBridgeOccupied += 1 }
                     if wallCells.contains(b2) { skippedBridgeOccupied += 1 }
+                    let (connTemplateNWSE, connHNWSE) = templateAndHeightForConnector(cell1: cell, cell2: se)
                     if !createdBridgeCells.contains(b1), !wallCells.contains(b1) {
                         let p = worldPositionAtCell(row: b1.row, col: b1.col)
                         guard let corner = outwardCorner(for: b1, wallCells: wallCells) else { continue }
@@ -1256,7 +1282,7 @@ struct SceneKitMapView: NSViewRepresentable {
                             duplicateMaterialsRecursive(tri)
                             var (minB, maxB) = tri.boundingBox
                             let currentHeight = max(0.001, CGFloat(maxB.y - minB.y))
-                            let scaleY = h / currentHeight
+                            let scaleY = connHNWSE / currentHeight
                             tri.scale = SCNVector3(1, scaleY, 1)
                             (minB, maxB) = tri.boundingBox
                             let y = max(groundLevelY, -CGFloat(minB.y)) + 0.5
@@ -1269,8 +1295,8 @@ struct SceneKitMapView: NSViewRepresentable {
                                 applyTransparencyRecursive(alpha, to: tri)
                             }
                         } else {
-                            tri = makeRightTrianglePrismNode(corner: corner, size: connectorSize, height: h, color: color, alpha: alpha)
-                            if let source = wallMaterialTemplate?.copy() as? SCNMaterial {
+                            tri = makeRightTrianglePrismNode(corner: corner, size: connectorSize, height: connHNWSE, color: color, alpha: alpha)
+                            if let source = (useWallTexture ? firstMaterialRecursive(connTemplateNWSE) : nil)?.copy() as? SCNMaterial {
                                 source.transparency = alpha
                                 source.isDoubleSided = true
                                 tri.geometry?.materials = [source]
@@ -1294,7 +1320,7 @@ struct SceneKitMapView: NSViewRepresentable {
                             duplicateMaterialsRecursive(tri)
                             var (minB, maxB) = tri.boundingBox
                             let currentHeight = max(0.001, CGFloat(maxB.y - minB.y))
-                            let scaleY = h / currentHeight
+                            let scaleY = connHNWSE / currentHeight
                             tri.scale = SCNVector3(1, scaleY, 1)
                             (minB, maxB) = tri.boundingBox
                             let y = max(groundLevelY, -CGFloat(minB.y)) + 0.5
@@ -1307,8 +1333,8 @@ struct SceneKitMapView: NSViewRepresentable {
                                 applyTransparencyRecursive(alpha, to: tri)
                             }
                         } else {
-                            tri = makeRightTrianglePrismNode(corner: corner, size: connectorSize, height: h, color: color, alpha: alpha)
-                            if let source = wallMaterialTemplate?.copy() as? SCNMaterial {
+                            tri = makeRightTrianglePrismNode(corner: corner, size: connectorSize, height: connHNWSE, color: color, alpha: alpha)
+                            if let source = (useWallTexture ? firstMaterialRecursive(connTemplateNWSE) : nil)?.copy() as? SCNMaterial {
                                 source.transparency = alpha
                                 source.isDoubleSided = true
                                 tri.geometry?.materials = [source]
@@ -1335,6 +1361,7 @@ struct SceneKitMapView: NSViewRepresentable {
                     let b2 = MapCoordinate(row: r + 1, col: c)
                     if wallCells.contains(b1) { skippedBridgeOccupied += 1 }
                     if wallCells.contains(b2) { skippedBridgeOccupied += 1 }
+                    let (connTemplateNESW, connHNESW) = templateAndHeightForConnector(cell1: cell, cell2: sw)
                     if !createdBridgeCells.contains(b1), !wallCells.contains(b1) {
                         let p = worldPositionAtCell(row: b1.row, col: b1.col)
                         guard let corner = outwardCorner(for: b1, wallCells: wallCells) else { continue }
@@ -1344,7 +1371,7 @@ struct SceneKitMapView: NSViewRepresentable {
                             duplicateMaterialsRecursive(tri)
                             var (minB, maxB) = tri.boundingBox
                             let currentHeight = max(0.001, CGFloat(maxB.y - minB.y))
-                            let scaleY = h / currentHeight
+                            let scaleY = connHNESW / currentHeight
                             tri.scale = SCNVector3(1, scaleY, 1)
                             (minB, maxB) = tri.boundingBox
                             let y = max(groundLevelY, -CGFloat(minB.y)) + 0.5
@@ -1357,8 +1384,8 @@ struct SceneKitMapView: NSViewRepresentable {
                                 applyTransparencyRecursive(alpha, to: tri)
                             }
                         } else {
-                            tri = makeRightTrianglePrismNode(corner: corner, size: connectorSize, height: h, color: color, alpha: alpha)
-                            if let source = wallMaterialTemplate?.copy() as? SCNMaterial {
+                            tri = makeRightTrianglePrismNode(corner: corner, size: connectorSize, height: connHNESW, color: color, alpha: alpha)
+                            if let source = (useWallTexture ? firstMaterialRecursive(connTemplateNESW) : nil)?.copy() as? SCNMaterial {
                                 source.transparency = alpha
                                 source.isDoubleSided = true
                                 tri.geometry?.materials = [source]
@@ -1382,7 +1409,7 @@ struct SceneKitMapView: NSViewRepresentable {
                             duplicateMaterialsRecursive(tri)
                             var (minB, maxB) = tri.boundingBox
                             let currentHeight = max(0.001, CGFloat(maxB.y - minB.y))
-                            let scaleY = h / currentHeight
+                            let scaleY = connHNESW / currentHeight
                             tri.scale = SCNVector3(1, scaleY, 1)
                             (minB, maxB) = tri.boundingBox
                             let y = max(groundLevelY, -CGFloat(minB.y)) + 0.5
@@ -1395,8 +1422,8 @@ struct SceneKitMapView: NSViewRepresentable {
                                 applyTransparencyRecursive(alpha, to: tri)
                             }
                         } else {
-                            tri = makeRightTrianglePrismNode(corner: corner, size: connectorSize, height: h, color: color, alpha: alpha)
-                            if let source = wallMaterialTemplate?.copy() as? SCNMaterial {
+                            tri = makeRightTrianglePrismNode(corner: corner, size: connectorSize, height: connHNESW, color: color, alpha: alpha)
+                            if let source = (useWallTexture ? firstMaterialRecursive(connTemplateNESW) : nil)?.copy() as? SCNMaterial {
                                 source.transparency = alpha
                                 source.isDoubleSided = true
                                 tri.geometry?.materials = [source]
@@ -1484,13 +1511,13 @@ struct SceneKitMapView: NSViewRepresentable {
                     let instance = template.clone()
                     var (minB, _) = instance.boundingBox
                     let placeY = max(groundLevelY, -CGFloat(minB.y))
-                    let wallShift: (offsetX: CGFloat, offsetZ: CGFloat) = p.objectId == Wall.objectId
+                    let wallShift: (offsetX: CGFloat, offsetZ: CGFloat) = WallParent.isWall(objectId: p.objectId)
                         ? applyAdaptiveWallShape(instance, row: r, col: c, wallCells: wallCells)
                         : (offsetX: 0, offsetZ: 0)
                     instance.position = SCNVector3(pos.x + wallShift.offsetX, placeY, pos.z + wallShift.offsetZ)
                     _ = SceneKitPlacementRegistry.reapplyTexture(objectId: p.objectId, to: instance, bundle: .main)
                     node.addChildNode(instance)
-                    if p.objectId == Wall.objectId {
+                    if WallParent.isWall(objectId: p.objectId) {
                         var (mn, mx) = instance.boundingBox
                         let finalHeight = CGFloat(mx.y - mn.y)
                         placementDebug("render Wall instance row=\(r) col=\(c) placeY=\(String(format: "%.2f", placeY)) finalHeight=\(String(format: "%.3f", finalHeight)) bboxY=[\(String(format: "%.3f", CGFloat(mn.y))),\(String(format: "%.3f", CGFloat(mx.y)))]")
@@ -1519,7 +1546,8 @@ struct SceneKitMapView: NSViewRepresentable {
         for p in placements {
             addPlacementNode(for: p, to: node, templates: templates, fallback: boxFallback, wallCells: wallCells)
         }
-        if let wallTemplate = templates[Wall.objectId], hasAnyDiagonalAdjacency(wallCells) {
+        if let wallTemplate = templates[HugeWall.objectId], hasAnyDiagonalAdjacency(wallCells) {
+            let wallObjectIds = wallCellToObjectId(from: placements)
             let count = addWallDiagonalConnectors(
                 to: node,
                 wallCells: wallCells,
@@ -1528,7 +1556,9 @@ struct SceneKitMapView: NSViewRepresentable {
                 alpha: 1.0,
                 templateForHeight: wallTemplate,
                 useWallTexture: true,
-                stepsTemplate: templates[Steps.objectId]
+                stepsTemplate: templates[Steps.objectId],
+                wallObjectIdPerCell: wallObjectIds,
+                smallWallTemplate: templates[SmallWall.objectId]
             )
             if count > 0 {
                 placementDebug("wall diagonal connectors created: \(count)")
@@ -1536,12 +1566,12 @@ struct SceneKitMapView: NSViewRepresentable {
         }
     }
 
-    private func refreshWallLinePreview(_ node: SCNNode?, cells: [(Int, Int)], templates: [String: SCNNode], existingWallCells: Set<MapCoordinate>) {
+    private func refreshWallLinePreview(_ node: SCNNode?, cells: [(Int, Int)], templates: [String: SCNNode], existingWallCells: Set<MapCoordinate>, wallObjectIdPerCell: [MapCoordinate: String] = [:]) {
         guard let node = node else { return }
         node.childNodes.forEach { $0.removeFromParentNode() }
         guard !cells.isEmpty,
-              let template = templates[Wall.objectId],
-              let config = SceneKitPlacementRegistry.config(for: Wall.objectId) else { return }
+              let template = templates[HugeWall.objectId],
+              let config = SceneKitPlacementRegistry.config(for: HugeWall.objectId) else { return }
         let previewSet = Set(cells.map { MapCoordinate(row: $0.0, col: $0.1) })
         let allWallCells = existingWallCells.union(previewSet)
         placementDebug("wall preview update: dragCells=\(cells.count) uniquePreview=\(previewSet.count) existing=\(existingWallCells.count) total=\(allWallCells.count)")
@@ -1575,7 +1605,9 @@ struct SceneKitMapView: NSViewRepresentable {
             alpha: 0.55,
             templateForHeight: template,
             useWallTexture: true,
-            stepsTemplate: templates[Steps.objectId]
+            stepsTemplate: templates[Steps.objectId],
+            wallObjectIdPerCell: wallObjectIdPerCell.isEmpty ? nil : wallObjectIdPerCell,
+            smallWallTemplate: templates[SmallWall.objectId]
         )
         placementDebug("wall preview render result: connectorNodes=\(created)")
     }
@@ -1623,10 +1655,10 @@ struct SceneKitMapView: NSViewRepresentable {
         let scaleX = (cw * cellSizeW) / dx
         let scaleZ = (ch * cellSizeH) / dz
         let scaleY: CGFloat
-        if config.objectId == Wall.objectId {
-            // Wall je već modeliran u točnoj world skali (40x400x40), bez dodatnog scale-a.
+        if WallParent.isWall(objectId: config.objectId) {
+            // Zid (veliki/mali) je već u točnoj world skali, bez dodatnog scale-a.
             placementNode.scale = SCNVector3(1, 1, 1)
-            if config.objectId == Wall.objectId {
+            if WallParent.isWall(objectId: config.objectId) {
                 let finalHeight = dy
                 placementDebug("template Wall source(dx=\(String(format: "%.3f", dx)),dy=\(String(format: "%.3f", dy)),dz=\(String(format: "%.3f", dz))) scale(x=1.000,y=1.000,z=1.000) finalHeight=\(String(format: "%.3f", finalHeight))")
             }

@@ -122,7 +122,7 @@ final class GameState: ObservableObject {
     /// Postavke kamere na mapi (zoom, nagib, brzina pomicanja) – mijenjaju se u Postavkama.
     @Published var mapCameraSettings: MapCameraSettings = MapCameraSettings()
 
-    /// Odabrani objekt za postavljanje (npr. Wall.objectId); nil = ništa odabrano.
+    /// Odabrani objekt za postavljanje (npr. HugeWall.objectId); nil = ništa odabrano.
     @Published var selectedPlacementObjectId: String?
 
     /// Odabrani alat u panelu Alati: "sword", "mace", "report", "shovel", "pen". Nil = mač (zadano). Utječe na kursor i oznaku u panelu.

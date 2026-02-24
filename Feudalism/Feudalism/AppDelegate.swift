@@ -13,7 +13,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let fullScreenMaxRetries = 30
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
-        _ = Wall.checkAndLogTextureStatus(bundle: .main)
+        _ = HugeWall.checkAndLogTextureStatus(bundle: .main)
         tryEnterFullScreen()
     }
 

@@ -29,7 +29,9 @@ final class ObjectHealth {
 
     private func registerDefaults() {
         // Zid: 10 levela × 10 HP = 100 max HP
-        set(Wall.objectId, config: ObjectHealthConfig(levels: 10, hpPerLevel: 10))
+        set(HugeWall.objectId, config: ObjectHealthConfig(levels: 10, hpPerLevel: 10))
+        // Mali zid: 6 levela × 6 HP = 36 max HP (6/10)
+        set(SmallWall.objectId, config: ObjectHealthConfig(levels: 6, hpPerLevel: 6))
         // Tržnica: 5×10 = 50 HP
         set(Market.objectId, config: ObjectHealthConfig(levels: 5, hpPerLevel: 10))
         // Farma: 5×8 = 40 HP
