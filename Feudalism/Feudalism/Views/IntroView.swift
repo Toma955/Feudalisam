@@ -8,10 +8,12 @@
 import SwiftUI
 import AppKit
 
-private let titleFull = "Feudalism"
+private let titleFull = "Feudallinteligence"
 private let bigTitleFontSize: CGFloat = 140
+private let cloudTitleFontSize: CGFloat = 38
 /// Sporija animacija: slovo po slovo tijekom učitavanja.
 private let letterInterval: TimeInterval = 0.22
+private let moveToCloudDuration: TimeInterval = 0.58
 
 struct IntroView: View {
     @EnvironmentObject private var gameState: GameState
@@ -19,10 +21,11 @@ struct IntroView: View {
     var onComplete: () -> Void
 
     @State private var visibleLetterCount: Int = 0
-    @State private var bigTitleScale: CGFloat = 1
-    @State private var bigTitleOpacity: Double = 1
     @State private var menuOpacity: Double = 0
     @State private var didComplete: Bool = false
+    @State private var animationComplete: Bool = false
+    /// Kad true, naslov animira gore u obli kvadrat (oblak), zatim onComplete.
+    @State private var titleMovingToCloud: Bool = false
 
     private var visibleTitle: String {
         let n = min(visibleLetterCount, titleFull.count)
@@ -33,26 +36,40 @@ struct IntroView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            MainMenuView()
+            MainMenuView(hideTitle: true)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .opacity(menuOpacity)
+                .animation(.easeInOut(duration: moveToCloudDuration), value: menuOpacity)
                 .allowsHitTesting(menuOpacity > 0.99)
                 .environmentObject(gameState)
 
-            // Naslov na istoj poziciji kao u MainMenuView (padding 56, 40, VStack spacing 28, title + .bottom 8)
-            VStack(spacing: 28) {
-                Text(visibleTitle)
-                    .font(.custom("Georgia", size: bigTitleFontSize))
-                    .fontWeight(.bold)
-                    .foregroundStyle(.white.opacity(0.98))
-                    .shadow(color: .black.opacity(0.5), radius: 4, x: 0, y: 2)
-                    .scaleEffect(bigTitleScale)
-                    .opacity(bigTitleOpacity)
-                    .padding(.bottom, 8)
-                Spacer(minLength: 0)
+            // Naslov: u centru veliki, pa animacija gore u oblak (obli kvadrat)
+            GeometryReader { geo in
+                let centerY = geo.size.height / 2
+                let cloudY: CGFloat = 6 + 37
+                VStack(spacing: 0) {
+                    Text(titleMovingToCloud ? titleFull : visibleTitle)
+                        .font(.custom("Georgia", size: titleMovingToCloud ? cloudTitleFontSize : bigTitleFontSize))
+                        .fontWeight(.bold)
+                        .foregroundStyle(.white.opacity(0.98))
+                        .shadow(color: .black.opacity(0.5), radius: titleMovingToCloud ? 2 : 4, x: 0, y: titleMovingToCloud ? 1 : 2)
+                        .padding(.horizontal, titleMovingToCloud ? 36 : 0)
+                        .padding(.vertical, titleMovingToCloud ? 18 : 0)
+                        .background(titleMovingToCloud ? AnyShapeStyle(Material.ultraThin) : AnyShapeStyle(Color.clear))
+                        .clipShape(RoundedRectangle(cornerRadius: titleMovingToCloud ? 20 : 0, style: .continuous))
+                        .shadow(color: .black.opacity(titleMovingToCloud ? 0.3 : 0), radius: titleMovingToCloud ? 12 : 0, y: titleMovingToCloud ? 6 : 0)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .position(x: geo.size.width / 2, y: titleMovingToCloud ? cloudY : centerY)
+                        .animation(.easeInOut(duration: moveToCloudDuration), value: titleMovingToCloud)
+
+                    if !titleMovingToCloud { Spacer(minLength: 0).frame(maxHeight: .infinity) }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.leading, 56)
+                .padding(.trailing, 56)
+                .padding(.top, 56)
             }
-            .padding(40)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(56)
+            .ignoresSafeArea()
 
             if !assetLoader.isLoaded {
                 VStack(spacing: 8) {
@@ -71,14 +88,33 @@ struct IntroView: View {
         }
         .onAppear { startSequence() }
         .onChange(of: assetLoader.isLoaded) { _, loaded in
-            if loaded, !didComplete {
-                didComplete = true
-                onComplete()
-            }
+            if loaded { tryComplete() }
+        }
+        .onChange(of: animationComplete) { _, done in
+            if done { tryComplete() }
         }
     }
 
-    /// Animacija naslova tijekom učitavanja; izbornik se prikaže tek kad je učitavanje 100% (onChange(isLoaded)).
+    /// Kad su animacija i učitavanje gotovi, prvo animiraj naslov gore u oblak, pa onComplete.
+    private func tryComplete() {
+        guard !didComplete else { return }
+        if animationComplete && assetLoader.isLoaded {
+            startMoveToCloud()
+        }
+    }
+
+    private func startMoveToCloud() {
+        guard !didComplete else { return }
+        visibleLetterCount = titleFull.count
+        titleMovingToCloud = true
+        menuOpacity = 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + moveToCloudDuration) {
+            didComplete = true
+            onComplete()
+        }
+    }
+
+    /// Animacija naslova slovo po slovo; kad su sva slova i učitavanje gotovi, naslov ide gore u oblak.
     private func startSequence() {
         let volume = gameState.audioMusicVolume
         AudioManager.shared.playIntroSoundtrackIfAvailable(volume: volume)
@@ -91,6 +127,10 @@ struct IntroView: View {
                     visibleLetterCount = i
                 }
             }
+        }
+        let animationDuration = letterInterval * Double(titleFull.count) + 0.2
+        DispatchQueue.main.asyncAfter(deadline: .now() + animationDuration) {
+            animationComplete = true
         }
     }
 }

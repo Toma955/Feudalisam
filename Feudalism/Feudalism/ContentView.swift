@@ -72,32 +72,39 @@ private let resourceMaxDisplay = 999_999
 /// Širina za broj (6 znamenki: 999999).
 private let resourceDigitWidth: CGFloat = 56
 
-/// Jedan resurs u HUD-u: ikona + broj. Broj uvijek u fiksnoj širini (do 6 znamenki) da se traka ne mijenja.
+/// Jedan resurs u HUD-u: ikona + opcionalno broj. U solo modu samo ikona (bez natpisa).
 private struct ResourceRow: View {
     let iconName: String
     let value: Int
     var iconSize: CGFloat = 44
     var systemFallback: String = "cube.fill"
+    /// false = samo ikona (solo gameplay, bez broja).
+    var iconOnly: Bool = false
     private var image: NSImage? { loadResourceIcon(named: iconName) }
     private var displayValue: Int { min(resourceMaxDisplay, max(0, value)) }
     var body: some View {
-        HStack(spacing: 4) {
-            if let img = image {
-                Image(nsImage: img)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: iconSize, height: iconSize)
-            } else {
-                Image(systemName: systemFallback)
-                    .font(.system(size: iconSize * 0.6))
-                    .foregroundStyle(.white.opacity(0.95))
+        HStack(spacing: iconOnly ? 0 : 4) {
+            Group {
+                if let img = image {
+                    Image(nsImage: img)
+                        .resizable()
+                        .scaledToFit()
+                } else {
+                    Image(systemName: systemFallback)
+                        .font(.system(size: iconOnly ? iconSize * 0.7 : iconSize * 0.6))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.white.opacity(0.95))
+                }
             }
-            Text("\(displayValue)")
-                .font(.system(size: 16, weight: .medium, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.95))
-                .frame(width: resourceDigitWidth, alignment: .trailing)
+            .frame(width: iconSize, height: iconSize)
+            if !iconOnly {
+                Text("\(displayValue)")
+                    .font(.system(size: 16, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.95))
+                    .frame(width: resourceDigitWidth, alignment: .trailing)
+            }
         }
-        .frame(width: ResourceRow.fixedWidth(iconSize: iconSize))
+        .frame(width: iconOnly ? iconSize : ResourceRow.fixedWidth(iconSize: iconSize))
     }
     static func fixedWidth(iconSize: CGFloat) -> CGFloat { iconSize + 4 + resourceDigitWidth }
 }
@@ -627,13 +634,22 @@ struct ContentView: View {
 
                     HUDBarDivider()
 
-                    // Resursi: novci (zlato), drvo, kamen, željezo; Food = kruh, hmelj, žito. Fiksna širina da se sivi element ne mijenja.
-                    HStack(spacing: 12) {
-                        if resourceStripMode == .resources {
-                            ResourceRow(iconName: "gold", value: gameState.gold, iconSize: 52, systemFallback: "dollarsign.circle.fill")
-                            ResourceRow(iconName: "wood", value: gameState.wood)
-                            ResourceRow(iconName: "stone", value: gameState.stone, iconSize: 52)
-                            ResourceRow(iconName: "iron", value: gameState.iron, iconSize: 52)
+                    // Resursi: solo = samo ikone (zlato, drvo, kamen, željezo, kruh, hmelj, žito); uvijek prikaži ikonu (asset ili SF Symbol).
+                    HStack(spacing: gameState.isSoloMode ? 16 : 12) {
+                        if gameState.isSoloMode {
+                            ResourceRow(iconName: "gold", value: gameState.resources.gold, iconSize: 48, systemFallback: "dollarsign.circle.fill", iconOnly: true)
+                            ResourceRow(iconName: "wood", value: gameState.resources.wood, iconSize: 48, systemFallback: "leaf.fill", iconOnly: true)
+                            ResourceRow(iconName: "stone", value: gameState.resources.stone, iconSize: 48, systemFallback: "mountain.2.fill", iconOnly: true)
+                            ResourceRow(iconName: "iron", value: gameState.resources.iron, iconSize: 48, systemFallback: "cylinder.fill", iconOnly: true)
+                            ResourceRow(iconName: "bread", value: gameState.food, iconSize: 48, systemFallback: "fork.knife", iconOnly: true)
+                            ResourceRow(iconName: "hop", value: gameState.hop, iconSize: 48, systemFallback: "mug.fill", iconOnly: true)
+                                .help(LocalizedStrings.string(for: "resource_hop", language: gameState.appLanguage))
+                            ResourceRow(iconName: "hay", value: gameState.hay, iconSize: 48, systemFallback: "circle.hexagongrid.fill", iconOnly: true)
+                        } else if resourceStripMode == .resources {
+                            ResourceRow(iconName: "gold", value: gameState.resources.gold, iconSize: 52, systemFallback: "dollarsign.circle.fill")
+                            ResourceRow(iconName: "wood", value: gameState.resources.wood)
+                            ResourceRow(iconName: "stone", value: gameState.resources.stone, iconSize: 52)
+                            ResourceRow(iconName: "iron", value: gameState.resources.iron, iconSize: 52)
                         } else {
                             ResourceRow(iconName: "bread", value: gameState.food)
                             ResourceRow(iconName: "hop", value: gameState.hop)
@@ -641,7 +657,7 @@ struct ContentView: View {
                             ResourceRow(iconName: "hay", value: gameState.hay)
                         }
                     }
-                    .frame(width: 520)
+                    .frame(width: gameState.isSoloMode ? 420 : 520)
                     .id(resourceStripMode)
                     .transition(.asymmetric(
                         insertion: .opacity.animation(.easeOut(duration: 0.22)).combined(with: .scale(scale: 0.92)),

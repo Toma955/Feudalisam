@@ -39,6 +39,17 @@ Pods/
 # Carthage
 Carthage/Build/
 
+# Ikone i slike – ne spremati na Git (izuzetak: Icons/resources = resursi, te se pushaju)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+# Izuzetak: resursi (ikone resursa) – pushati na GitHub
+!Feudalism/Feudalism/Feudalism/Icons/resources/*.png
+!Feudalism/Feudalism/Feudalism/Icons/resources/*.jpg
+!Feudalism/Feudalism/Feudalism/Icons/resources/*.jpeg
+
 # Svi .obj modeli – samo lokalno (build koristi iz Core/Objects/), ne na GitHub; datoteke se NE brišu s diska
 Feudalism/Feudalism/Core/Objects/**/*.obj
 # Veliki 3D modeli (preko GitHub limita 100 MB) – drži lokalno, build kopira iz Core/Objects/

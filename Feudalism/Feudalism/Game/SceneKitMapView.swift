@@ -837,11 +837,16 @@ struct SceneKitMapView: NSViewRepresentable {
             let hits = sv.hitTest(container.convert(loc, to: sv), options: hitOptions)
             guard let hit = hits.first(where: { $0.node.name == "terrain" }),
                   let (row, col) = cellFromMapLocalPosition(hit.worldCoordinates) else { return }
-            let ghostColor = NSColor(red: 0.15, green: 0.95, blue: 0.25, alpha: 1)
-            applyGhostColorRecursive(ghost, color: ghostColor, transparency: 0.55)
             let (centerRow, centerCol): (Int, Int) = config.cellW == 1 && config.cellH == 1
                 ? (row, col)
                 : (row + config.cellH / 2, col + config.cellW / 2)
+            let cellsForConditions = [(centerRow, centerCol)]
+            let canPlaceWall = !WallParent.isWall(objectId: objectId)
+                || WallBuildConditions.wallBuildConditionsMet(gameState: gameState, objectId: objectId, cells: cellsForConditions)
+            let ghostColor = canPlaceWall
+                ? NSColor(red: 0.15, green: 0.95, blue: 0.25, alpha: 1)   // zelena = dozvoljeno
+                : NSColor(red: 0.95, green: 0.2, blue: 0.2, alpha: 1)      // crvena = onemogućeno
+            applyGhostColorRecursive(ghost, color: ghostColor, transparency: 0.55)
             let pos = worldPositionAtCell(row: centerRow, col: centerCol)
             var (minB, _) = ghost.boundingBox
             let y = max(groundLevelY, -CGFloat(minB.y) + config.yOffset)
@@ -859,22 +864,30 @@ struct SceneKitMapView: NSViewRepresentable {
         container.onWallLinePreview = { [gameState] cells in
             let existingWalls = wallCellsSet(from: gameState.gameMap.placements)
             var wallObjectIds = wallCellToObjectId(from: gameState.gameMap.placements)
+            let objectId = gameState.selectedPlacementObjectId ?? HugeWall.objectId
             for (row, col) in cells {
-                wallObjectIds[MapCoordinate(row: row, col: col)] = gameState.selectedPlacementObjectId ?? HugeWall.objectId
+                wallObjectIds[MapCoordinate(row: row, col: col)] = objectId
             }
             refreshWallLinePreview(
                 coord.wallLinePreviewNode,
                 cells: cells,
                 templates: coord.placementTemplates,
                 existingWallCells: existingWalls,
-                wallObjectIdPerCell: wallObjectIds
+                wallObjectIdPerCell: wallObjectIds,
+                gameState: gameState,
+                objectId: objectId
             )
         }
         container.onWallLineCommit = { [gameState, coord] cells in
             guard !cells.isEmpty else { return }
             DispatchQueue.main.async {
-                if let sid = gameState.selectedPlacementObjectId, !WallParent.isWall(objectId: sid) {
+                let objectId = gameState.selectedPlacementObjectId ?? HugeWall.objectId
+                if !WallParent.isWall(objectId: objectId) {
                     gameState.selectedPlacementObjectId = HugeWall.objectId
+                }
+                let objectIdForWall = gameState.selectedPlacementObjectId ?? HugeWall.objectId
+                if WallParent.isWall(objectId: objectIdForWall), !WallBuildConditions.wallBuildConditionsMet(gameState: gameState, objectId: objectIdForWall, cells: cells) {
+                    return
                 }
                 var placedAny = false
                 for (row, col) in cells {
@@ -901,7 +914,6 @@ struct SceneKitMapView: NSViewRepresentable {
         DispatchQueue.main.async {
             gameState.levelLoadingMessage = nil
             gameState.isLevelReady = true
-            gameState.runSoloResourceAnimationIfNeeded()
         }
 
         container.onPanChange = { [gameState] delta in
@@ -941,6 +953,9 @@ struct SceneKitMapView: NSViewRepresentable {
             guard let objId = objectId, !objId.isEmpty else {
                 let msg = "Objekt nije odabran. Odaberi Zid/Tržnicu (Dvor), Mlin/Pekaru (Hrana) ili Kokošinjac/Kukuruz (Farma) u donjem baru."
                 DispatchQueue.main.async { gameState.placementError = msg }
+                return
+            }
+            if WallParent.isWall(objectId: objId), !WallBuildConditions.wallBuildConditionsMet(gameState: gameState, objectId: objId, cells: [(row, col)]) {
                 return
             }
             DispatchQueue.main.async {
@@ -1566,7 +1581,7 @@ struct SceneKitMapView: NSViewRepresentable {
         }
     }
 
-    private func refreshWallLinePreview(_ node: SCNNode?, cells: [(Int, Int)], templates: [String: SCNNode], existingWallCells: Set<MapCoordinate>, wallObjectIdPerCell: [MapCoordinate: String] = [:]) {
+    private func refreshWallLinePreview(_ node: SCNNode?, cells: [(Int, Int)], templates: [String: SCNNode], existingWallCells: Set<MapCoordinate>, wallObjectIdPerCell: [MapCoordinate: String] = [:], gameState: GameState? = nil, objectId: String = HugeWall.objectId) {
         guard let node = node else { return }
         node.childNodes.forEach { $0.removeFromParentNode() }
         guard !cells.isEmpty,
@@ -1575,7 +1590,10 @@ struct SceneKitMapView: NSViewRepresentable {
         let previewSet = Set(cells.map { MapCoordinate(row: $0.0, col: $0.1) })
         let allWallCells = existingWallCells.union(previewSet)
         placementDebug("wall preview update: dragCells=\(cells.count) uniquePreview=\(previewSet.count) existing=\(existingWallCells.count) total=\(allWallCells.count)")
-        let ghostColor = NSColor(red: 0.15, green: 0.95, blue: 0.25, alpha: 1)
+        let canPlace = gameState.map { WallBuildConditions.wallBuildConditionsMet(gameState: $0, objectId: objectId, cells: cells) } ?? true
+        let ghostColor = canPlace
+            ? NSColor(red: 0.15, green: 0.95, blue: 0.25, alpha: 1)
+            : NSColor(red: 0.95, green: 0.2, blue: 0.2, alpha: 1)
         let slopedLine = isWallLineSloped(cells)
         let slopedByExisting = hasDiagonalAdjacency(in: allWallCells, involving: previewSet)
         let sloped = slopedLine || slopedByExisting

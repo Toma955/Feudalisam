@@ -14,7 +14,7 @@ final class BarIconCache {
     private let lock = NSLock()
     private var cache: [String: NSImage] = [:]
 
-    private static let subdirs = ["Icons", "icons", "Feudalism/Icons", "Feudalism/icons"]
+    private static let subdirs = ["Core/Icons", "Icons", "Icons/resources", "icons", "Feudalism/Core/Icons", "Feudalism/Icons", "Feudalism/Icons/resources", "Feudalism/icons"]
 
     private init() {}
 

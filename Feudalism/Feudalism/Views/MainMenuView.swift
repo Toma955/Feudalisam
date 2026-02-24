@@ -8,24 +8,32 @@
 import SwiftUI
 import AppKit
 
-private let glassCornerRadius: CGFloat = 24
-private let buttonCornerRadius: CGFloat = 22
-private let tileWidth: CGFloat = 260
-private let tileHeight: CGFloat = 64
-private let iconSize: CGFloat = 36
-private let iconColumnWidth: CGFloat = 52
+private let glassCornerRadius: CGFloat = 32
+private let buttonCornerRadius: CGFloat = 26
+private let tileWidth: CGFloat = 520
+private let tileHeight: CGFloat = 88
+private let iconSize: CGFloat = 56
+private let iconColumnWidth: CGFloat = 72
 
-private let postavkeCategoryIconSize: CGFloat = 28
-private let postavkeBottomBarHeight: CGFloat = 52
-/// Postojeći okvir za meni (Solo, Nova igra, …); pri Nazad vraća se na ovo.
-private let menuPanelMaxWidth: CGFloat = 320
-private let menuPanelMaxHeight: CGFloat = 420
+private let postavkeCategoryIconSize: CGFloat = 38
+private let postavkeBottomBarHeight: CGFloat = 64
+/// Glavni prozor – gotovo veličina zaslona (1920×1080 → ~90%).
+private let menuPanelMaxWidth: CGFloat = 1680
+private let menuPanelMaxHeight: CGFloat = 960
 /// Veći okvir kad su otvorene postavke.
-private let postavkePanelMaxWidth: CGFloat = 540
-private let postavkePanelMaxHeight: CGFloat = 500
+private let postavkePanelMaxWidth: CGFloat = 1500
+private let postavkePanelMaxHeight: CGFloat = 900
+/// Solo setup – isti veliki prozor.
+private let soloPanelWidth: CGFloat = 1600
+private let soloPanelHeight: CGFloat = 920
 private let menuPostavkeTransitionDuration: Double = 0.28
+/// Naslov "Feudalism" točno 50 pt od vrha ekrana; središnji panel ostaje centriran.
+private let titleTopPadding: CGFloat = 50
 
 struct MainMenuView: View {
+    /// Kad true, naslov se ne crta (npr. u IntroViewu isti natpis animira do vrha).
+    var hideTitle: Bool = false
+
     @EnvironmentObject private var gameState: GameState
     @State private var showPostavke = false
     @State private var showGameSetup = false
@@ -37,7 +45,7 @@ struct MainMenuView: View {
         ZStack {
             FireBackgroundView()
 
-            // Stakleni obi kvadrat – meni (postojeći okvir) ili postavke (veći okvir); Nazad vraća u postojeći
+            // Središnji element – centriran na ekranu (Solo, Nova igra, …)
             VStack(spacing: 0) {
                 if showPostavke {
                     embeddedPostavkeContent
@@ -48,6 +56,7 @@ struct MainMenuView: View {
                 } else if showSoloSetup {
                     SoloSetupView(isPresented: $showSoloSetup)
                         .environmentObject(gameState)
+                        .ignoresSafeArea(edges: .bottom)
                         .transition(.asymmetric(
                             insertion: .opacity.combined(with: .scale(scale: 0.92)),
                             removal: .opacity.combined(with: .scale(scale: 0.92))
@@ -60,14 +69,35 @@ struct MainMenuView: View {
                         ))
                 }
             }
-            .padding(40)
+            .padding(72)
             .background(.ultraThinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous))
             .shadow(color: .black.opacity(0.35), radius: 24, y: 12)
-            .frame(maxWidth: (showPostavke ? postavkePanelMaxWidth : (showSoloSetup ? 320 : menuPanelMaxWidth)), maxHeight: (showPostavke ? postavkePanelMaxHeight : (showSoloSetup ? 420 : menuPanelMaxHeight)))
-            .padding(56)
+            .frame(maxWidth: (showPostavke ? postavkePanelMaxWidth : (showSoloSetup ? soloPanelWidth : menuPanelMaxWidth)), maxHeight: (showPostavke ? postavkePanelMaxHeight : (showSoloSetup ? soloPanelHeight : menuPanelMaxHeight)))
             .animation(.easeInOut(duration: menuPostavkeTransitionDuration), value: showPostavke)
             .animation(.easeInOut(duration: menuPostavkeTransitionDuration), value: showSoloSetup)
+            .padding(.horizontal, 48)
+            .padding(.top, 48)
+            .padding(.bottom, showSoloSetup ? 0 : 48)
+
+            // Naslov – kad je solo mode: manji i pomaknut prema gore (manji top padding)
+            if !hideTitle {
+                let isSoloMode = showSoloSetup
+                Text("Feudallinteligence")
+                    .font(.custom("Georgia", size: isSoloMode ? 22 : 32))
+                    .fontWeight(.bold)
+                    .foregroundStyle(.white.opacity(0.98))
+                    .shadow(color: .black.opacity(0.4), radius: 2, x: 0, y: 1)
+                    .padding(.horizontal, isSoloMode ? 24 : 36)
+                    .padding(.vertical, isSoloMode ? 12 : 18)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: isSoloMode ? 14 : 20, style: .continuous))
+                    .shadow(color: .black.opacity(0.3), radius: 12, y: 6)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .padding(.top, isSoloMode ? 24 : titleTopPadding)
+                    .animation(.easeInOut(duration: menuPostavkeTransitionDuration), value: showSoloSetup)
+                    .allowsHitTesting(false)
+            }
         }
         .sheet(isPresented: $showGameSetup) {
             GameSetupView()
@@ -111,15 +141,8 @@ struct MainMenuView: View {
     }
 
     private var menuContent: some View {
-        VStack(spacing: 28) {
-            Text("Feudalism")
-                .font(.custom("Georgia", size: 44))
-                .fontWeight(.bold)
-                .foregroundStyle(.white.opacity(0.98))
-                .shadow(color: .black.opacity(0.4), radius: 2, x: 0, y: 1)
-                .padding(.bottom, 8)
-
-            VStack(spacing: 14) {
+        VStack(spacing: 36) {
+            VStack(spacing: 24) {
                 menuTile(title: "Solo", icon: "play.circle.fill") {
                     withAnimation(.easeInOut(duration: menuPostavkeTransitionDuration)) {
                         showSoloSetup = true
@@ -217,7 +240,7 @@ struct MainMenuView: View {
                 HStack {
                     Spacer(minLength: 0)
                     Text(title)
-                        .font(.custom("Georgia", size: 20))
+                        .font(.custom("Georgia", size: 28))
                         .foregroundStyle(.white.opacity(0.9))
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)

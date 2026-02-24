@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftUI
+import Combine
 
 /// Ulazni uređaj za upravljanje – u General postavkama; kasnije posebne funkcije za trackpad i miš.
 enum InputDevice: String, CaseIterable {
@@ -107,11 +108,10 @@ final class GameState: ObservableObject {
     /// Realm kojim igrač upravlja (nil u solo ako nema „protivnika”).
     @Published var playerRealmId: String?
 
-    @Published var gold: Int = 100
     @Published var food: Int = 80
-    @Published var wood: Int = 0
-    @Published var iron: Int = 0
-    @Published var stone: Int = 0
+    /// Jedini izvor istine za kamen, drvo, željezo – sve davanja/trošenja/prodaja idu preko ovoga.
+    let resources: GameResources
+    private var resourcesCancellable: AnyCancellable?
     @Published var hay: Int = 0
     @Published var hop: Int = 0
 
@@ -143,9 +143,6 @@ final class GameState: ObservableObject {
     /// Status učitavanja teksture zida (prikazuje se u Map Editoru). nil = još nije provjereno.
     @Published var wallTextureStatus: String?
 
-    /// Da se animacija resursa 0→100 u solo modu pokrene samo jednom kad se level učita.
-    private var hasRunSoloResourceAnimation = false
-    private var soloResourceAnimationWorkItem: DispatchWorkItem?
 
     /// Trackpad ili miš – u Postavkama → General; kasnije posebne funkcije po uređaju.
     @Published var inputDevice: InputDevice {
@@ -202,6 +199,8 @@ final class GameState: ObservableObject {
 
     init(mapSize: MapSizePreset = .size200) {
         self.gameMap = mapSize.makeGameMap()
+        let res = GameResources()
+        self.resources = res
         let raw = UserDefaults.standard.string(forKey: Self.inputDeviceKey) ?? InputDevice.trackpad.rawValue
         self.inputDevice = InputDevice(rawValue: raw) ?? .trackpad
         let langRaw = UserDefaults.standard.string(forKey: Self.appLanguageKey) ?? AppLanguage.croatian.rawValue
@@ -217,6 +216,7 @@ final class GameState: ObservableObject {
         self.audioSoundsVolume = UserDefaults.standard.object(forKey: Self.audioSoundsVolumeKey) as? Double ?? 0.8
         self.audioSpeechVolume = UserDefaults.standard.object(forKey: Self.audioSpeechVolumeKey) as? Double ?? 0.8
         self.currentLevelName = "Level"  // učitaj Level.scn ako postoji; inače proceduralni teren
+        self.resourcesCancellable = res.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
     }
 
     // MARK: - Način igre
@@ -297,16 +297,29 @@ final class GameState: ObservableObject {
         isLevelReady = false
         levelLoadingMessage = "Učitavanje mape (\(gameMap.rows)×\(gameMap.cols))…"
         isShowingMainMenu = false
-        hasRunSoloResourceAnimation = false
         if isSoloMode {
-            stone = 0
-            wood = 0
-            iron = 0
+            resources.resetForNewSoloGame()
         }
     }
 
     /// Dodaj sebe (human lord) i odabrane AI lordove, pa pokreni igru. Solo = samo ti; mapSize određuje veličinu mape.
-    func startNewGameWithSetup(humanName: String, humanColorHex: String = "2E86AB", selectedAIProfileIds: [String], mapSize: MapSizePreset = .size200) {
+    /// Početni resursi: mogu doći iz datoteke (StartingResourcesLoader / starting_resources.json) ili iz UI overridea u SoloSetupView.
+    /// initialGold/Wood/Iron/Stone: vrijednosti koje igrač dobiva na početku (pročitane iz filea ili odabrane strelicama).
+    /// soloLevelName: ime levela iz bundlea (npr. "Level") ili nil za proceduralnu mapu.
+    func startNewGameWithSetup(
+        humanName: String,
+        humanColorHex: String = "2E86AB",
+        selectedAIProfileIds: [String],
+        mapSize: MapSizePreset = .size200,
+        initialGold: Int = 0,
+        initialWood: Int = 0,
+        initialIron: Int = 0,
+        initialStone: Int = 0,
+        initialFood: Int = 0,
+        initialHop: Int = 0,
+        initialHay: Int = 0,
+        soloLevelName: String? = "Level"
+    ) {
         let store = AILordProfileStore.shared
         var newRealms: [Realm] = []
         let human = Realm(
@@ -327,31 +340,17 @@ final class GameState: ObservableObject {
         }
         setRealms(newRealms)
         setMapSize(mapSize)
+        currentLevelName = soloLevelName
+        if isSoloMode, soloLevelName == nil {
+            SceneKitLevelLoader.deleteSoloLevelFiles()
+        }
         startNewGame()
-    }
-
-    /// Pozovi kad je level učitan (isLevelReady = true). U solo igri (ne Map Editor) animira kamen, drvo i željezo od 0 do 100 (jednom).
-    func runSoloResourceAnimationIfNeeded() {
-        guard isSoloMode, !isMapEditorMode, !hasRunSoloResourceAnimation else { return }
-        hasRunSoloResourceAnimation = true
-        soloResourceAnimationWorkItem?.cancel()
-        runSoloResourceAnimationStep(step: 0, steps: 50, interval: 1.5 / 50, stepAmount: 2)
-    }
-
-    private func runSoloResourceAnimationStep(step: Int, steps: Int, interval: TimeInterval, stepAmount: Int) {
-        let value = min(100, step * stepAmount)
-        DispatchQueue.main.async { [weak self] in
-            self?.stone = value
-            self?.wood = value
-            self?.iron = value
+        if isSoloMode {
+            resources.setStock(stone: max(0, initialStone), wood: max(0, initialWood), iron: max(0, initialIron), gold: max(0, initialGold))
+            food = max(0, initialFood)
+            hop = max(0, initialHop)
+            hay = max(0, initialHay)
         }
-        guard step < steps else { return }
-        let next = step + 1
-        let work = DispatchWorkItem { [weak self] in
-            self?.runSoloResourceAnimationStep(step: next, steps: steps, interval: interval, stepAmount: stepAmount)
-        }
-        soloResourceAnimationWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + interval, execute: work)
     }
 
     /// Promijeni veličinu mape (nova igra).
@@ -372,11 +371,15 @@ extension GameState {
             placementDebugLog("FAIL no selected object")
             return false
         }
+        if !isMapEditorMode, WallParent.isWall(objectId: objectId), !WallBuildConditions.wallBuildConditionsMet(gameState: self, objectId: objectId, cells: [(row, col)]) {
+            placementDebugLog("FAIL wall build conditions not met row=\(row) col=\(col)")
+            return false
+        }
         if !isMapEditorMode {
             let cost = BuildCosts.shared.cost(for: objectId)
-            if !BuildCosts.shared.canAfford(objectId: objectId, stone: stone, wood: wood, iron: iron) {
+            if !resources.canAfford(objectId: objectId) {
                 placementError = "Nedovoljno resursa. Potrebno: \(cost.stone) kamen, \(cost.wood) drvo, \(cost.iron) željezo."
-                placementDebugLog("FAIL insufficient resources object=\(objectId) have(s=\(stone),w=\(wood),i=\(iron)) need(s=\(cost.stone),w=\(cost.wood),i=\(cost.iron))")
+                placementDebugLog("FAIL insufficient resources object=\(objectId) have(s=\(resources.stone),w=\(resources.wood),i=\(resources.iron)) need(s=\(cost.stone),w=\(cost.wood),i=\(cost.iron))")
                 return false
             }
         }
@@ -392,9 +395,7 @@ extension GameState {
         }
         if !isMapEditorMode {
             let cost = BuildCosts.shared.cost(for: objectId)
-            stone -= cost.stone
-            wood -= cost.wood
-            iron -= cost.iron
+            resources.subtract(cost)
         }
         placementsVersion += 1
         objectWillChange.send()
