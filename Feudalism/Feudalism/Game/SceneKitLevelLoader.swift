@@ -61,7 +61,7 @@ enum SceneKitLevelLoader {
         // Obriši staru spremljenu mapu da se ne učitava bijeli/starí level – nova se generira s ispravnom teksturom.
         try? FileManager.default.removeItem(at: scnURL)
         try? FileManager.default.removeItem(at: textureURL)
-        if SceneKitMapView.exportTerrainTexture(to: textureURL),
+        if SceneKitMapView.exportTerrainTextureFromNode(terrainNode, to: textureURL),
            let image = NSImage(contentsOf: textureURL) {
             let cloneForFile = terrainNode.clone()
             cloneForFile.position = SCNVector3Zero

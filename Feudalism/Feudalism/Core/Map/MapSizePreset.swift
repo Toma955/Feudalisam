@@ -2,12 +2,12 @@
 //  MapSizePreset.swift
 //  Feudalism
 //
-//  Preseti veličine mape – sve u 1×1 jedinicama (100×100, 200×200, 1000×1000).
+//  Preseti veličine mape – nasljeđuju MapCreationRules. Klik na 200 → 200×200, 400 → 400×400.
 //
 
 import Foundation
 
-/// Unaprijed definirane veličine mape. Mapa je uvijek u 1×1 jedinicama.
+/// Unaprijed definirane veličine mape. Kreacija nasljeđuje MapCreationRules (zlatno pravilo).
 enum MapSizePreset: String, CaseIterable, Identifiable {
     case size200 = "200×200"
     case size400 = "400×400"
@@ -16,7 +16,8 @@ enum MapSizePreset: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var rows: Int {
+    /// Stranica mape (200, 400, 800, 1000) – iz pravila.
+    var side: Int {
         switch self {
         case .size200: return 200
         case .size400: return 400
@@ -25,17 +26,11 @@ enum MapSizePreset: String, CaseIterable, Identifiable {
         }
     }
 
-    var cols: Int {
-        switch self {
-        case .size200: return 200
-        case .size400: return 400
-        case .size800: return 800
-        case .size1000: return 1000
-        }
-    }
+    var rows: Int { MapCreationRules.rows(forPresetSide: side) }
+    var cols: Int { MapCreationRules.cols(forPresetSide: side) }
 
-    /// Kreira novu GameMap ove veličine.
+    /// Kreira novu GameMap prema pravilima (200 → 200×200, 400 → 400×400).
     func makeGameMap() -> GameMap {
-        GameMap(rows: rows, cols: cols)
+        MapCreationRules.makeGameMap(presetSide: side)
     }
 }

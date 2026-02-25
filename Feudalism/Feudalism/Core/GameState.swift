@@ -435,7 +435,7 @@ extension GameState {
 
     /// Spremi trenutnu mapu u Application Support (Map Editor). Vraća true ako je uspjelo.
     func saveEditorMap() -> Bool {
-        let data = MapEditorSaveData(rows: gameMap.rows, cols: gameMap.cols, placements: gameMap.placements)
+        let data = MapEditorSaveData(rows: gameMap.rows, cols: gameMap.cols, placements: gameMap.placements, cells: gameMap.cells)
         guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appendingPathComponent("Feudalism", isDirectory: true) else { return false }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -458,6 +458,7 @@ extension GameState {
               let data = try? JSONDecoder().decode(MapEditorSaveData.self, from: raw) else { return false }
         guard data.rows == gameMap.rows, data.cols == gameMap.cols else { return false }
         gameMap.replacePlacements(data.placements)
+        if let cells = data.cells { gameMap.replaceCells(cells) }
         objectWillChange.send()
         return true
     }
@@ -466,6 +467,69 @@ extension GameState {
     func clearEditorMap() {
         gameMap.replacePlacements([])
         objectWillChange.send()
+    }
+}
+
+// MARK: - Terrain elevation (Map Editor – alat Teren)
+enum TerrainToolOption: String, CaseIterable {
+    case raise5 = "Podigni za 5"
+    case raise10 = "Podigni za 10"
+    case flatten = "Izravnaj"
+}
+
+/// Jedan odabir četkice terena: 3 kocke (mala, srednja, velika) ili 3 kruga (mali, srednji, veliki). Samo jedan može biti izabran.
+enum TerrainBrushOption: String, CaseIterable {
+    case kockaMala
+    case kockaSrednja
+    case kockaVelika
+    case krugMali
+    case krugSrednji
+    case krugVeliki
+
+    var radius: Int {
+        switch self {
+        case .kockaMala, .krugMali: return 1
+        case .kockaSrednja, .krugSrednji: return 2
+        case .kockaVelika, .krugVeliki: return 3
+        }
+    }
+
+    var isSquare: Bool {
+        switch self {
+        case .kockaMala, .kockaSrednja, .kockaVelika: return true
+        case .krugMali, .krugSrednji, .krugVeliki: return false
+        }
+    }
+}
+
+extension GameState {
+    /// Primijeni alat za teren na ćelije oko (centerRow, centerCol). Kocke 10×10 mjere elevaciju.
+    func applyTerrainElevation(centerRow: Int, centerCol: Int, tool: TerrainToolOption, brushOption: TerrainBrushOption) {
+        let r = brushOption.radius
+        var cellsToUpdate: [(Int, Int)] = []
+        for dr in -r...r {
+            for dc in -r...r {
+                let row = centerRow + dr
+                let col = centerCol + dc
+                guard gameMap.isValid(MapCoordinate(row: row, col: col)) else { continue }
+                if brushOption.isSquare { /* kvadrat – sve ćelije u bounding boxu */ } else {
+                    if dr * dr + dc * dc > r * r { continue }
+                }
+                cellsToUpdate.append((row, col))
+            }
+        }
+        let centerHeight = gameMap.height(at: MapCoordinate(row: centerRow, col: centerCol))
+        for (row, col) in cellsToUpdate {
+            let coord = MapCoordinate(row: row, col: col)
+            let current = gameMap.height(at: coord)
+            let newHeight: CGFloat
+            switch tool {
+            case .raise5: newHeight = current + 5
+            case .raise10: newHeight = current + 10
+            case .flatten: newHeight = centerHeight
+            }
+            gameMap.setHeight(at: coord, newHeight)
+        }
     }
 }
 

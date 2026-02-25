@@ -154,26 +154,12 @@ final class GameScene: SKScene {
         nsView.addTrackingArea(area)
     }
 
-    /// Paleta boja terena: pustinja (pijesak), kava (smeđe), šporko bijela – nasumično po poljima.
-    private static let terrainPalette: [SKColor] = [
-        SKColor(red: 0.76, green: 0.70, blue: 0.55, alpha: 0.92), // pustinja / pijesak
-        SKColor(red: 0.72, green: 0.65, blue: 0.48, alpha: 0.92),
-        SKColor(red: 0.68, green: 0.58, blue: 0.42, alpha: 0.92),
-        SKColor(red: 0.55, green: 0.42, blue: 0.30, alpha: 0.92), // kava
-        SKColor(red: 0.50, green: 0.38, blue: 0.28, alpha: 0.92),
-        SKColor(red: 0.45, green: 0.35, blue: 0.26, alpha: 0.92),
-        SKColor(red: 0.58, green: 0.50, blue: 0.42, alpha: 0.92),
-        SKColor(red: 0.82, green: 0.78, blue: 0.72, alpha: 0.92), // šporko bijela
-        SKColor(red: 0.78, green: 0.74, blue: 0.68, alpha: 0.92),
-        SKColor(red: 0.72, green: 0.68, blue: 0.62, alpha: 0.92),
-        SKColor(red: 0.70, green: 0.62, blue: 0.50, alpha: 0.92),
-    ]
+    /// Boja terena: bijela pozadina mape (bez nasumičnih kavastih/zemljanih nijansi).
+    private static let terrainColorSingle = SKColor.white
 
-    /// Jedinstvena boja terena za (row, col) – deterministički „random” da mapa ostane ista.
+    /// Boja terena za (row, col) – jednoliko bijela.
     private static func terrainColor(row: Int, col: Int) -> SKColor {
-        let n = (row &* 31 &+ col) % 997
-        let idx = (n &+ (col &* 17) % 311) % terrainPalette.count
-        return terrainPalette[idx]
+        terrainColorSingle
     }
 
     private func setupMapGrid() {

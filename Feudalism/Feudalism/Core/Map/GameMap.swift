@@ -59,6 +59,25 @@ final class GameMap: ObservableObject {
         cells[coordinate.cellId] = cell
     }
 
+    /// Postavi elevaciju na ćeliji (Map Editor – alat za teren).
+    func setHeight(at coordinate: MapCoordinate, _ value: CGFloat) {
+        guard isValid(coordinate), var cell = cells[coordinate.cellId] else { return }
+        cell.height = value
+        cells[coordinate.cellId] = cell
+        objectWillChange.send()
+    }
+
+    /// Vrati elevaciju na ćeliji (0 ako ne postoji).
+    func height(at coordinate: MapCoordinate) -> CGFloat {
+        cell(at: coordinate)?.height ?? 0
+    }
+
+    /// Zamijeni sve ćelije (npr. pri učitavanju mape u Map Editoru).
+    func replaceCells(_ newCells: [String: MapCell]) {
+        cells = newCells
+        objectWillChange.send()
+    }
+
     // MARK: - Placement (objekti koji zauzimaju 1×1 do N×M ćelija)
 
     /// Placement koji pokriva danu koordinatu (ili nil ako je prazno).
@@ -110,7 +129,25 @@ final class GameMap: ObservableObject {
 
 // MARK: - Map Editor – spremanje / učitavanje mape
 struct MapEditorSaveData: Codable {
+    enum CodingKeys: String, CodingKey { case rows, cols, placements, cells }
     let rows: Int
     let cols: Int
     let placements: [Placement]
+    /// Ćelije (teren + elevacija); opcionalno za stari save.
+    let cells: [String: MapCell]?
+
+    init(rows: Int, cols: Int, placements: [Placement], cells: [String: MapCell]? = nil) {
+        self.rows = rows
+        self.cols = cols
+        self.placements = placements
+        self.cells = cells
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        rows = try c.decode(Int.self, forKey: .rows)
+        cols = try c.decode(Int.self, forKey: .cols)
+        placements = try c.decode([Placement].self, forKey: .placements)
+        cells = try c.decodeIfPresent([String: MapCell].self, forKey: .cells)
+    }
 }
