@@ -38,6 +38,7 @@ struct MainMenuView: View {
     @State private var showPostavke = false
     @State private var showGameSetup = false
     @State private var showSoloSetup = false
+    @State private var showMapEditorChoice = false
     @State private var postavkeSection: PostavkeSection = .general
     @State private var showExitConfirmation = false
 
@@ -61,6 +62,13 @@ struct MainMenuView: View {
                             insertion: .opacity.combined(with: .scale(scale: 0.92)),
                             removal: .opacity.combined(with: .scale(scale: 0.92))
                         ))
+                } else if showMapEditorChoice {
+                    MapEditorChoiceView(isPresented: $showMapEditorChoice)
+                        .environmentObject(gameState)
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .scale(scale: 0.92)),
+                            removal: .opacity.combined(with: .scale(scale: 0.92))
+                        ))
                 } else {
                     menuContent
                         .transition(.asymmetric(
@@ -69,13 +77,14 @@ struct MainMenuView: View {
                         ))
                 }
             }
-            .padding(72)
+            .padding(EdgeInsets(top: 72, leading: 72, bottom: showSoloSetup ? 0 : 72, trailing: 72))
             .background(.ultraThinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: glassCornerRadius, style: .continuous))
             .shadow(color: .black.opacity(0.35), radius: 24, y: 12)
-            .frame(maxWidth: (showPostavke ? postavkePanelMaxWidth : (showSoloSetup ? soloPanelWidth : menuPanelMaxWidth)), maxHeight: (showPostavke ? postavkePanelMaxHeight : (showSoloSetup ? soloPanelHeight : menuPanelMaxHeight)))
+            .frame(maxWidth: (showPostavke ? postavkePanelMaxWidth : (showSoloSetup ? soloPanelWidth : (showMapEditorChoice ? 900 : menuPanelMaxWidth))), maxHeight: (showPostavke ? postavkePanelMaxHeight : (showSoloSetup ? soloPanelHeight : (showMapEditorChoice ? 520 : menuPanelMaxHeight))))
             .animation(.easeInOut(duration: menuPostavkeTransitionDuration), value: showPostavke)
             .animation(.easeInOut(duration: menuPostavkeTransitionDuration), value: showSoloSetup)
+            .animation(.easeInOut(duration: menuPostavkeTransitionDuration), value: showMapEditorChoice)
             .padding(.horizontal, 48)
             .padding(.top, 48)
             .padding(.bottom, showSoloSetup ? 0 : 48)
@@ -154,7 +163,9 @@ struct MainMenuView: View {
                 }
                 menuTile(title: "Map Editor", icon: "map.fill") {
                     AudioManager.shared.stopIntroSoundtrack()
-                    gameState.openMapEditor()
+                    withAnimation(.easeInOut(duration: menuPostavkeTransitionDuration)) {
+                        showMapEditorChoice = true
+                    }
                 }
                     menuTile(title: "Postavke", icon: "gearshape.fill") {
                         withAnimation(.easeInOut(duration: menuPostavkeTransitionDuration)) {

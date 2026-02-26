@@ -13,6 +13,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let fullScreenMaxRetries = 30
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
+        MapStorage.createSizeFoldersIfNeeded()
+        let cwd = FileManager.default.currentDirectoryPath
+        let projectDir = ProcessInfo.processInfo.environment["PROJECT_DIR"] ?? "—"
+        let mapsRoot = MapStorage.mapsRootPath()
+        let mapsInProject = MapStorage.isMapsRootInProject()
+        let logPath = FeudalismLog.logFileURL?.path ?? "—"
+        FeudalismLog.log("App started. cwd=\(cwd). PROJECT_DIR=\(projectDir). Maps root=\(mapsRoot). Maps in project=\(mapsInProject). Log file=\(logPath)")
+        if !mapsInProject {
+            FeudalismLog.log("Spremanje NIJE u projekt. Da bude u projektu: Xcode → Product → Scheme → Edit Scheme → Run → Arguments → Environment Variables → dodaj PROJECT_DIR, Value: $(PROJECT_DIR). Zatim Run → Options → Working Directory: $(PROJECT_DIR).")
+        }
+        if let mapsURL = MapStorage.mapsRoot(), !FileManager.default.fileExists(atPath: mapsURL.path) {
+            fputs("[Feudalism] UPOZORENJE: Maps folder nije na disku: \(mapsURL.path)\n", stderr)
+            fflush(stderr)
+        }
         _ = HugeWall.checkAndLogTextureStatus(bundle: .main)
         tryEnterFullScreen()
     }

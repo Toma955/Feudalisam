@@ -12,6 +12,8 @@ import Combine
 @MainActor
 final class PlacementDebugConsole: ObservableObject {
     static let shared = PlacementDebugConsole()
+    /// Kad false (zadano), placementDebugLog i mapEditorConsoleLog ne ispisuju ništa – konzola ostaje prazna. Nonisolated da ga placementDebugLog može čitati s bilo koje niti.
+    nonisolated(unsafe) static var verbose: Bool = false
 
     @Published private(set) var lines: [String] = []
     private let maxLines = 600
@@ -46,11 +48,21 @@ final class PlacementDebugConsole: ObservableObject {
     }
 }
 
-/// Jedna točka za placement debug poruke: ide i u Xcode konzolu i u in-app konzolu.
+/// Jedna točka za placement debug poruke: ide i u Xcode konzolu i u in-app konzolu. Kad PlacementDebugConsole.verbose == false, ne ispisuje ništa.
 func placementDebugLog(_ message: String) {
+    guard PlacementDebugConsole.verbose else { return }
     let line = "[PlacementDebug] \(message)"
     print(line)
     Task { @MainActor in
         PlacementDebugConsole.shared.append(line)
+    }
+}
+
+/// Poruke iz Map Editora (pan, hit test itd.): ispis u Xcode i u in-app konzolu. Kad PlacementDebugConsole.verbose == false, ne ispisuje ništa.
+func mapEditorConsoleLog(_ message: String) {
+    guard PlacementDebugConsole.verbose else { return }
+    NSLog("%@", message)
+    Task { @MainActor in
+        PlacementDebugConsole.shared.append(message)
     }
 }

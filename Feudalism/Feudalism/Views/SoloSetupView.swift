@@ -32,6 +32,14 @@ private enum SoloSetupSection: String, CaseIterable {
     case rules = "Pravila"
 }
 
+/// Shape: Capsule ili Circle da kompajler ne zapne na ternaru.
+private struct CapsuleOrCircleShape: Shape {
+    var useCapsule: Bool
+    func path(in rect: CGRect) -> Path {
+        useCapsule ? Capsule().path(in: rect) : Circle().path(in: rect)
+    }
+}
+
 struct SoloSetupView: View {
     @EnvironmentObject private var gameState: GameState
     @Binding var isPresented: Bool
@@ -68,6 +76,8 @@ struct SoloSetupView: View {
     @State private var initialMace: Int = 0
     @State private var initialBowAndSparrow: Int = 0
     @State private var selectedSection: SoloSetupSection = .map
+    /// Indeks odabrane mape u listi za trenutnu veličinu (0-based). Koristi se kad u folderu ima mapa.
+    @State private var selectedMapIndex: Int = 0
     // Opcije generiranja (kad je Generiraj odabrano)
     @State private var randomVegetacija: Bool = true
     @State private var randomRadnaPozicija: Bool = true
@@ -77,199 +87,280 @@ struct SoloSetupView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Spacer(minLength: 16)
-
-            // Sadržaj ovisno o odabiru: Mapa (s indikatorom veličine) ili Resursi ili Pravila
-            Group {
-                switch selectedSection {
-                case .map:
-                    mapSection
-                case .resources:
-                    resourcesSection
-                case .rules:
-                    rulesSection
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .animation(.easeInOut(duration: 0.2), value: selectedSection)
-
-            Spacer(minLength: 0)
-
-            // 5 gumba pri dnu: Nazad | Mapa | Resursi | Pravila | Pokreni
-            HStack(spacing: 0) {
+            if selectedSection == .resources {
+                sectionContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 Spacer(minLength: 0)
-                HStack(alignment: .center, spacing: 16) {
-                    Button { isPresented = false } label: {
-                        Label("Nazad", systemImage: "chevron.backward")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(.white)
-                            .frame(minWidth: 88, minHeight: 44)
-                            .background(Color.black)
-                            .clipShape(RoundedRectangle(cornerRadius: soloSetupCornerRadius, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-
-                    Button { selectedSection = .map } label: {
-                        Text("Mapa")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(selectedSection == .map ? .white : .white.opacity(0.8))
-                            .frame(minWidth: 88, minHeight: 44)
-                            .background(selectedSection == .map ? Color.green.opacity(0.9) : Color.white.opacity(0.1))
-                            .clipShape(RoundedRectangle(cornerRadius: soloSetupCornerRadius, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-
-                    Button { selectedSection = .resources } label: {
-                        Text("Resursi")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(selectedSection == .resources ? .white : .white.opacity(0.8))
-                            .frame(minWidth: 88, minHeight: 44)
-                            .background(selectedSection == .resources ? Color.green.opacity(0.9) : Color.white.opacity(0.1))
-                            .clipShape(RoundedRectangle(cornerRadius: soloSetupCornerRadius, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-
-                    Button { selectedSection = .rules } label: {
-                        Text("Pravila")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(selectedSection == .rules ? .white : .white.opacity(0.8))
-                            .frame(minWidth: 88, minHeight: 44)
-                            .background(selectedSection == .rules ? Color.green.opacity(0.9) : Color.white.opacity(0.1))
-                            .clipShape(RoundedRectangle(cornerRadius: soloSetupCornerRadius, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        AudioManager.shared.stopIntroSoundtrack()
-                        gameState.startNewGameWithSetup(
-                            humanName: "Igrač",
-                            selectedAIProfileIds: [],
-                            mapSize: selectedMapSize,
-                            initialGold: initialGold,
-                            initialWood: initialWood,
-                            initialIron: initialIron,
-                            initialStone: initialStone,
-                            initialFood: initialFood,
-                            initialHop: initialHop,
-                            initialHay: initialHay,
-                            soloLevelName: selectedMapType.levelName
-                        )
-                        isPresented = false
-                    } label: {
-                        Label("Pokreni", systemImage: "play.fill")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(minWidth: 88, minHeight: 44)
-                            .background(Color.green)
-                            .clipShape(RoundedRectangle(cornerRadius: soloSetupCornerRadius, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
-                .background(Color.white.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: soloSetupCornerRadius, style: .continuous))
+            } else {
                 Spacer(minLength: 0)
+                sectionContent
             }
-            .padding(.bottom, 0)
+            soloSetupBottomBar
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .ignoresSafeArea(edges: .bottom)
         .onAppear { loadDefaultsFromFile() }
     }
 
-    // MARK: - Mapa: prikaz mape s indikatorom veličine + Učitaj/Generiraj
-    private var mapSection: some View {
-        VStack(spacing: 20) {
-            let previewSide: CGFloat = {
-                switch selectedMapSize {
-                case .size200: return 180
-                case .size400: return 260
-                case .size800: return 340
-                case .size1000: return 400
-                }
-            }()
-            ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.black.opacity(0.6))
-                    .frame(width: previewSide, height: previewSide)
-                    .animation(.easeInOut(duration: 0.28), value: selectedMapSize)
+    /// Sadržaj ovisno o odabiru: Mapa, Resursi ili Pravila.
+    private var sectionContent: some View {
+        Group {
+            switch selectedSection {
+            case .map:
+                SoloMapChoiceView(
+                    selectedMapSize: $selectedMapSize,
+                    selectedMapIndex: $selectedMapIndex,
+                    selectedMapType: $selectedMapType,
+                    randomVegetacija: $randomVegetacija,
+                    randomRadnaPozicija: $randomRadnaPozicija,
+                    randomRijeke: $randomRijeke,
+                    randomOscilacijeTerena: $randomOscilacijeTerena,
+                    randomZemlje: $randomZemlje
+                )
+                .environmentObject(gameState)
+            case .resources:
+                resourcesSection
+            case .rules:
+                rulesSection
             }
-            .frame(width: 420, height: 420)
+        }
+        .frame(maxWidth: .infinity)
+        .animation(.easeInOut(duration: 0.2), value: selectedSection)
+    }
 
-            // Indikator veličine (200×200 … 1000×1000)
-            HStack(spacing: 6) {
-                ForEach(MapSizePreset.allCases) { preset in
-                    Button {
-                        selectedMapSize = preset
-                    } label: {
-                        Text(preset.rawValue)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.95))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(selectedMapSize == preset ? Color.white.opacity(0.22) : Color.white.opacity(0.08))
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                }
+    /// Donji bar: Nazad | Mapa | Resursi | Pravila | [Nazad/Naprijed ili Kreiraj] | 2,4,6,8,10 | Pokreni. Cijelo vrijeme pri dnu.
+    private var soloSetupBottomBar: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            HStack(alignment: .center, spacing: 16) {
+                nazadButton
+                sectionButtonsGroup
+                mapNavOrCreateView
+                mapSizeChoiceView
+                pokreniButton
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+            .background(Color.white.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: soloSetupCornerRadius, style: .continuous))
+            Spacer(minLength: 0)
+        }
+        .padding(.bottom, 10)
+    }
 
-            // Učitaj | Generiraj (flip-flop)
-            HStack(spacing: 10) {
-                Button {
-                    selectedMapType = .level
-                } label: {
-                    Text(LocalizedStrings.string(for: "solo_map_load", language: gameState.appLanguage))
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(selectedMapType == .level ? .white : .white.opacity(0.6))
-                        .frame(minWidth: 80, minHeight: 44)
-                        .background(selectedMapType == .level ? Color.green.opacity(0.9) : Color.white.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                Button {
-                    selectedMapType = .procedural
-                } label: {
-                    Text(LocalizedStrings.string(for: "solo_map_generate", language: gameState.appLanguage))
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(selectedMapType == .procedural ? .white : .white.opacity(0.6))
-                        .frame(minWidth: 80, minHeight: 44)
-                        .background(selectedMapType == .procedural ? Color.green.opacity(0.9) : Color.white.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                }
-                .buttonStyle(.plain)
-            }
+    private var nazadButton: some View {
+        Button { isPresented = false } label: {
+            Label("Nazad", systemImage: "chevron.backward")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(minWidth: 88, minHeight: 44)
+                .background(Color.black)
+                .clipShape(RoundedRectangle(cornerRadius: soloSetupCornerRadius, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
 
-            // Kad je Generiraj: gumbi za random opcije (vegetacija, radna pozicija, rijeke, oscilacije terena, zemlje)
-            if selectedMapType == .procedural {
-                VStack(spacing: 10) {
-                    HStack(spacing: 8) {
-                        genOptionButton(title: "Random vegetacija", isOn: $randomVegetacija)
-                        genOptionButton(title: "Random radna pozicija", isOn: $randomRadnaPozicija)
-                        genOptionButton(title: "Random rijeke", isOn: $randomRijeke)
-                    }
-                    HStack(spacing: 8) {
-                        genOptionButton(title: "Random oscilacije terena", isOn: $randomOscilacijeTerena)
-                        genOptionButton(title: "Random zemlje", isOn: $randomZemlje)
-                    }
-                }
-                .padding(.top, 8)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
+    /// Mapa | Resursi | Pravila: obli kvadrati unutar jednog oblog kvadrata.
+    private static let sectionInnerSpacing: CGFloat = 6
+    private static let sectionInnerCorner: CGFloat = 12
+
+    private var sectionButtonsGroup: some View {
+        HStack(spacing: Self.sectionInnerSpacing) {
+            sectionButton(.map, label: "Mapa")
+            sectionButton(.resources, label: "Resursi")
+            sectionButton(.rules, label: "Pravila")
+        }
+        .padding(Self.sectionInnerSpacing)
+        .background(Color.white.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: soloSetupCornerRadius, style: .continuous))
+    }
+
+    private func sectionButton(_ section: SoloSetupSection, label: String) -> some View {
+        Button { selectedSection = section } label: {
+            Text(label)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(selectedSection == section ? .white : .white.opacity(0.8))
+                .frame(minWidth: 88, minHeight: 44)
+                .background(selectedSection == section ? Color.green.opacity(0.9) : Color.white.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: Self.sectionInnerCorner, style: .continuous))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Kad Map: jedan element – Kreiraj ili Nazad/Naprijed. Kad Resursi: 3 gumba. Kad Pravila: prazno.
+    private static let mapNavBoxWidth: CGFloat = 120
+    private static let mapNavBoxHeight: CGFloat = 44
+    private static let mapNavContentAnimation: Animation = .easeInOut(duration: 0.32)
+    private static let resourcesSlotSpacing: CGFloat = 6
+    private static let resourcesSlotCorner: CGFloat = 12
+    private static let resourcesThreeButtonsWidth: CGFloat = 156
+
+    private var middleSectionWidth: CGFloat {
+        switch selectedSection {
+        case .map: return Self.mapNavBoxWidth
+        case .resources: return Self.resourcesThreeButtonsWidth
+        case .rules: return 0
         }
     }
 
-    private func genOptionButton(title: String, isOn: Binding<Bool>) -> some View {
-        Button {
-            isOn.wrappedValue.toggle()
+    private var mapNavOrCreateView: some View {
+        Group {
+            if selectedSection == .map {
+                ZStack {
+                    if mapEntriesForCurrentSize.isEmpty {
+                        Button {
+                            selectedMapType = .procedural
+                        } label: {
+                            Text(LocalizedStrings.string(for: "solo_map_generate", language: gameState.appLanguage))
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .background(Color.green.opacity(0.85))
+                                .clipShape(RoundedRectangle(cornerRadius: soloSetupCornerRadius, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .transition(.opacity)
+                    }
+                    if !mapEntriesForCurrentSize.isEmpty {
+                        HStack(spacing: 0) {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.34)) {
+                                    selectedMapIndex = (selectedMapIndex - 1 + mapEntriesForCurrentSize.count) % mapEntriesForCurrentSize.count
+                                }
+                            } label: {
+                                Image(systemName: "chevron.left")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.9))
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            }
+                            .buttonStyle(.plain)
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.34)) {
+                                    selectedMapIndex = (selectedMapIndex + 1) % mapEntriesForCurrentSize.count
+                                }
+                            } label: {
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.9))
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .background(Color.white.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: soloSetupCornerRadius, style: .continuous))
+                        .transition(.opacity)
+                    }
+                }
+                .frame(width: Self.mapNavBoxWidth, height: Self.mapNavBoxHeight)
+                .animation(Self.mapNavContentAnimation, value: mapEntriesForCurrentSize.isEmpty)
+            } else if selectedSection == .resources {
+                resourcesThreeButtonsView
+            } else {
+                Color.clear
+                    .frame(width: 0, height: Self.mapNavBoxHeight)
+            }
+        }
+        .frame(width: middleSectionWidth, height: Self.mapNavBoxHeight)
+        .clipped()
+        .animation(.easeInOut(duration: 0.3), value: selectedSection)
+    }
+
+    /// Kad je Resursi odabran: 3 gumba u jednom elementu (placeholderi za sada).
+    private var resourcesThreeButtonsView: some View {
+        HStack(spacing: Self.resourcesSlotSpacing) {
+            ForEach(0..<3, id: \.self) { _ in
+                Color.white.opacity(0.06)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: Self.resourcesSlotCorner, style: .continuous))
+            }
+        }
+        .padding(Self.resourcesSlotSpacing)
+        .background(Color.white.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: soloSetupCornerRadius, style: .continuous))
+        .frame(width: Self.resourcesThreeButtonsWidth, height: Self.mapNavBoxHeight)
+    }
+
+    private var mapEntriesForCurrentSize: [MapCatalogEntry] {
+        MapCatalog.entries(forSide: selectedMapSize.side)
+    }
+
+    private var mapSizeChoiceView: some View {
+        HStack(spacing: 8) {
+            ForEach(MapSizePreset.allCases) { preset in
+                mapSizeButton(preset: preset)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.white.opacity(0.06))
+        .clipShape(Capsule())
+    }
+
+    private func mapSizeButton(preset: MapSizePreset) -> some View {
+        let isSelected = selectedMapSize == preset
+        return Button {
+            selectedMapSize = preset
+            let entries = MapCatalog.entries(forSide: preset.side)
+            selectedMapIndex = min(selectedMapIndex, max(0, entries.count - 1))
         } label: {
-            Text(title)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(isOn.wrappedValue ? .white : .white.opacity(0.6))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(isOn.wrappedValue ? Color.green.opacity(0.85) : Color.white.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            mapSizeButtonLabel(text: "\(preset.side / 100)", isSelected: isSelected)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func mapSizeButtonLabel(text: String, isSelected: Bool) -> some View {
+        Text(text)
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(.white.opacity(0.95))
+            .frame(width: 40, height: 40)
+            .background(isSelected ? Color.white.opacity(0.22) : Color.white.opacity(0.08))
+            .clipShape(CapsuleOrCircleShape(useCapsule: isSelected))
+    }
+
+    private var pokreniButton: some View {
+        Button {
+            AudioManager.shared.stopIntroSoundtrack()
+            let mapsForSize = MapCatalog.entries(forSide: selectedMapSize.side)
+            if !mapsForSize.isEmpty {
+                let entry = mapsForSize[min(selectedMapIndex, mapsForSize.count - 1)]
+                gameState.startSoloWithMapEntry(
+                    entry: entry,
+                    initialGold: initialGold,
+                    initialWood: initialWood,
+                    initialIron: initialIron,
+                    initialStone: initialStone,
+                    initialFood: initialFood,
+                    initialHop: initialHop,
+                    initialHay: initialHay
+                )
+            } else {
+                gameState.startNewGameWithSetup(
+                    humanName: "Igrač",
+                    selectedAIProfileIds: [],
+                    mapSize: selectedMapSize,
+                    initialGold: initialGold,
+                    initialWood: initialWood,
+                    initialIron: initialIron,
+                    initialStone: initialStone,
+                    initialFood: initialFood,
+                    initialHop: initialHop,
+                    initialHay: initialHay,
+                    soloLevelName: selectedMapType.levelName
+                )
+            }
+            isPresented = false
+        } label: {
+            HStack(spacing: 8) {
+                Text("Pokreni")
+                Image(systemName: "play.fill")
+                    .font(.system(size: 15, weight: .semibold))
+            }
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(minWidth: 102, minHeight: 48)
+            .background(Color.green)
+            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -321,10 +412,11 @@ struct SoloSetupView: View {
                 }
             }
             .padding(.horizontal, 32)
-            .padding(.top, -32)
+            .padding(.top, 0)
             .padding(.bottom, 20)
         }
         .frame(maxWidth: .infinity)
+        .scrollContentBackground(.hidden)
     }
 
     // MARK: - Pravila (placeholder)

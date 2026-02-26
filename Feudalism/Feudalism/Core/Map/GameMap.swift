@@ -2,18 +2,30 @@
 //  GameMap.swift
 //  Feudalism
 //
-//  Mapa mape – cijela karta u 1×1 jedinicama (npr. 100×100, 200×200, 1000×1000).
-//  Svaka ćelija = 1×1; objekti (npr. kuća 4×4) su Placement-i koji zauzimaju više ćelija.
+//  Mapa igre: grid ćelija za gradnju (40×40 svaka). Minimalna prostorna jedinica je 10×10;
+//  side u minimalnim jedinicama = rows * 4 kad je mapa kvadratna (npr. 50×50 ćelija → 200×200).
 //
 
 import Foundation
 
-/// Cijela mapa igre – grid 1×1 ćelija + lista postavljenih objekata (Placement).
+/// Cijela mapa igre – grid ćelija za gradnju (40×40) + lista postavljenih objekata (Placement).
 final class GameMap: ObservableObject {
-    /// Broj redaka (visina u 1×1 jedinicama).
+    /// Broj redaka (ćelija za gradnju 40×40).
     let rows: Int
-    /// Broj stupaca (širina u 1×1 jedinicama).
+    /// Broj stupaca (ćelija za gradnju 40×40).
     let cols: Int
+
+    /// Side za prikaz i folder: za preset (200,400,…) vraća rows, inače rows*4 (legacy).
+    var sideInSmallUnits: Int? {
+        guard rows == cols else { return nil }
+        return MapDimension.allSides.contains(rows) ? rows : (rows * MapScale.smallCellsPerObjectCubeSide)
+    }
+
+    /// Korisnički prikaz dimenzije: "200×200" (side).
+    var displayDimensionString: String {
+        if let side = sideInSmallUnits { return "\(side)×\(side)" }
+        return "\(rows)×\(cols)"
+    }
 
     /// Ćelije: key = MapCoordinate.cellId, value = MapCell (samo teren).
     @Published private(set) var cells: [String: MapCell] = [:]
@@ -52,11 +64,22 @@ final class GameMap: ObservableObject {
         coordinate.row >= 0 && coordinate.row < rows && coordinate.col >= 0 && coordinate.col < cols
     }
 
-    /// Postavi teren na ćeliji.
+    /// Postavi teren na ćeliji (runtime). Walkable i buildable se postavljaju prema terrain.
     func setTerrain(at coordinate: MapCoordinate, _ terrain: TerrainType) {
         guard isValid(coordinate), var cell = cells[coordinate.cellId] else { return }
         cell.terrain = terrain
+        cell.walkable = terrain.defaultWalkable
+        cell.buildable = terrain.defaultBuildable
         cells[coordinate.cellId] = cell
+        objectWillChange.send()
+    }
+
+    /// Postavi walkable na ćeliji (runtime; npr. u editoru).
+    func setWalkable(at coordinate: MapCoordinate, _ value: Bool) {
+        guard isValid(coordinate), var cell = cells[coordinate.cellId] else { return }
+        cell.walkable = value
+        cells[coordinate.cellId] = cell
+        objectWillChange.send()
     }
 
     /// Postavi elevaciju na ćeliji (Map Editor – alat za teren).
@@ -128,26 +151,51 @@ final class GameMap: ObservableObject {
 }
 
 // MARK: - Map Editor – spremanje / učitavanje mape
+// Fizička datoteka mora sadržavati:
+// - mapName, dimensions (rows, cols)
+// - Runtime (u igri) po tileu: id (izveden iz row,col), row/col, height/elevation, terrainType, walkable
+// - placements (objekti na mapi)
+// Editor-only (selected, hovered, brushPreview, tempHeightDelta, paintMask, debugFlags, undo/redo) se NE spremaju
+//   – generiraju se pri uključivanju editor moda i vežu na mapu.
+
 struct MapEditorSaveData: Codable {
-    enum CodingKeys: String, CodingKey { case rows, cols, placements, cells }
+    enum CodingKeys: String, CodingKey { case mapName, rows, cols, placements, cells, createdDate }
+    /// Ime mape (obavezno pri spremanju).
+    let mapName: String
     let rows: Int
     let cols: Int
     let placements: [Placement]
-    /// Ćelije (teren + elevacija); opcionalno za stari save.
+    /// Runtime podaci po ćeliji: id = coordinate.cellId, coordinate (row,col), height, terrain, walkable.
     let cells: [String: MapCell]?
+    /// Datum izgradnje/kreiranja mape (postavlja se pri prvom spremanju).
+    let createdDate: Date?
 
-    init(rows: Int, cols: Int, placements: [Placement], cells: [String: MapCell]? = nil) {
+    init(mapName: String, rows: Int, cols: Int, placements: [Placement], cells: [String: MapCell]? = nil, createdDate: Date? = nil) {
+        self.mapName = mapName
         self.rows = rows
         self.cols = cols
         self.placements = placements
         self.cells = cells
+        self.createdDate = createdDate
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        mapName = try c.decodeIfPresent(String.self, forKey: .mapName) ?? ""
         rows = try c.decode(Int.self, forKey: .rows)
         cols = try c.decode(Int.self, forKey: .cols)
         placements = try c.decode([Placement].self, forKey: .placements)
         cells = try c.decodeIfPresent([String: MapCell].self, forKey: .cells)
+        createdDate = try c.decodeIfPresent(Date.self, forKey: .createdDate)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(mapName, forKey: .mapName)
+        try c.encode(rows, forKey: .rows)
+        try c.encode(cols, forKey: .cols)
+        try c.encode(placements, forKey: .placements)
+        try c.encodeIfPresent(cells, forKey: .cells)
+        try c.encodeIfPresent(createdDate, forKey: .createdDate)
     }
 }

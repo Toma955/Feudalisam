@@ -133,6 +133,8 @@ final class GameState: ObservableObject {
 
     /// Ime levela za učitavanje iz .scn (bez ekstenzije). Npr. "Level" ili "Maps/Level". Nil = proceduralni teren.
     @Published var currentLevelName: String?
+    /// true kad je solo pokrenut s mapom učitanoj iz datoteke (Maps/…); scena gradi teren iz gameMap umjesto Level.scn/SoloLevel.scn.
+    @Published var soloMapLoadedFromFile: Bool = false
 
     /// Povećava se pri svakom place/remove da SwiftUI sigurno ažurira prikaz mape.
     @Published private(set) var placementsVersion: Int = 0
@@ -143,6 +145,16 @@ final class GameState: ObservableObject {
     /// Status učitavanja teksture zida (prikazuje se u Map Editoru). nil = još nije provjereno.
     @Published var wallTextureStatus: String?
 
+    /// Trenutni slot u Map Editoru (postavlja se pri učitavanju; nil kad je Create map).
+    @Published var mapEditorCurrentSlot: MapEditorSlot?
+    /// Ime trenutne mape (obavezno za spremanje); postavlja se pri učitavanju ili kad korisnik upiše.
+    @Published var mapEditorMapName: String = ""
+    /// Datum izgradnje mape (postavlja se pri kreiranju; pri učitavanju iz datoteke).
+    @Published var mapEditorCreatedDate: Date?
+    /// Editor-only stanje (selected, hovered, brushPreview, undo/redo) – generira se pri uključivanju editora, ne spremaju se u datoteku.
+    @Published var mapEditorState: MapEditorState?
+    /// Povećava se kad se kreira ili učitava mapa – forsira ponovnu izgradnju scene u Map Editoru da se prikaže trenutna mapa.
+    @Published private(set) var mapEditorSceneVersion: Int = 0
 
     /// Trackpad ili miš – u Postavkama → General; kasnije posebne funkcije po uređaju.
     @Published var inputDevice: InputDevice {
@@ -295,7 +307,7 @@ final class GameState: ObservableObject {
     /// Pokreni novu igru – skriva izbornik, prikazuje karticu. Resursi se u solo modu animiraju 0→100 kad se level učita.
     func startNewGame() {
         isLevelReady = false
-        levelLoadingMessage = "Učitavanje mape (\(gameMap.rows)×\(gameMap.cols))…"
+        levelLoadingMessage = "Učitavanje mape (\(gameMap.displayDimensionString))…"
         isShowingMainMenu = false
         if isSoloMode {
             resources.resetForNewSoloGame()
@@ -341,6 +353,7 @@ final class GameState: ObservableObject {
         setRealms(newRealms)
         setMapSize(mapSize)
         currentLevelName = soloLevelName
+        soloMapLoadedFromFile = false
         if isSoloMode, soloLevelName == nil {
             SceneKitLevelLoader.deleteSoloLevelFiles()
         }
@@ -351,6 +364,39 @@ final class GameState: ObservableObject {
             hop = max(0, initialHop)
             hay = max(0, initialHay)
         }
+    }
+
+    /// Solo: pokreni igru s mapom učitanoj iz kataloškog unosa (datoteka iz Maps/200x200/, …). Teren i placements dolaze iz te datoteke.
+    func startSoloWithMapEntry(
+        entry: MapCatalogEntry,
+        initialGold: Int = 0,
+        initialWood: Int = 0,
+        initialIron: Int = 0,
+        initialStone: Int = 0,
+        initialFood: Int = 0,
+        initialHop: Int = 0,
+        initialHay: Int = 0
+    ) {
+        setRealms([Realm(name: "Igrač", colorHex: "2E86AB", lordType: .human)])
+        guard let root = MapStorage.mapsRoot() else { return }
+        let fileURL = root.appendingPathComponent(entry.path)
+        guard let data = MapFileManager.load(from: fileURL) else { return }
+        applyLoadedMapDataForSolo(data)
+        currentLevelName = nil
+        soloMapLoadedFromFile = true
+        startNewGame()
+        resources.setStock(stone: max(0, initialStone), wood: max(0, initialWood), iron: max(0, initialIron), gold: max(0, initialGold))
+        food = max(0, initialFood)
+        hop = max(0, initialHop)
+        hay = max(0, initialHay)
+    }
+
+    /// Primijeni učitane podatke na gameMap (solo – bez editor state).
+    private func applyLoadedMapDataForSolo(_ data: MapEditorSaveData) {
+        let newMap = GameMap(rows: data.rows, cols: data.cols)
+        newMap.replacePlacements(data.placements)
+        if let cells = data.cells { newMap.replaceCells(cells) }
+        gameMap = newMap
     }
 
     /// Promijeni veličinu mape (nova igra).
@@ -388,7 +434,7 @@ extension GameState {
         let height = obj?.size.height ?? 1
         placementDebugLog("object=\(objectId) size=\(width)x\(height)")
         guard let _ = gameMap.place(objectId: objectId, width: width, height: height, atRow: row, col: col) else {
-            let msg = "Ne može se staviti na (\(row), \(col)) – ćelija zauzeta ili izvan mape \(gameMap.rows)×\(gameMap.cols)."
+            let msg = "Ne može se staviti na (\(row), \(col)) – ćelija zauzeta ili izvan mape \(gameMap.displayDimensionString)."
             placementError = msg
             placementDebugLog("FAIL map.place returned nil object=\(objectId) row=\(row) col=\(col)")
             return false
@@ -416,51 +462,200 @@ extension GameState {
 }
 
 // MARK: - Map Editor
+/// Slot za spremanje/učitavanje mape u Map Editoru (solo, dual, …).
+enum MapEditorSlot: String, CaseIterable, Identifiable {
+    case solo
+    case dual
+    case trio
+    case quatro
+    case five
+    case six
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .solo: return "Solo"
+        case .dual: return "Dual"
+        case .trio: return "Trio"
+        case .quatro: return "Quatro"
+        case .five: return "5"
+        case .six: return "6"
+        }
+    }
+
+    var fileName: String { "map_editor_\(rawValue).json" }
+}
+
 extension GameState {
-    /// Otvori Map Editor – prazna mapa prema trenutnoj veličini.
-    func openMapEditor() {
-        setMapSize(.size200)
+    /// Kreira mapu preko MapGenerator (jedna dimenzija side = kockasta mapa), sprema je u Maps/side×side/ i otvori Map Editor. Naziv mape treba biti već postavljen.
+    func createMapAndOpenEditor(name: String, side: Int) -> Bool {
+        guard let newMap = MapGenerator.createAndSaveMap(name: name, side: side, slot: .solo) else { return false }
+        gameMap = newMap
+        mapEditorCurrentSlot = .solo
+        mapEditorMapName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        mapEditorCreatedDate = Date()
+        mapEditorState = MapEditorState()
+        mapEditorSceneVersion += 1
         selectedPlacementObjectId = nil
         isShowingMainMenu = false
         isMapEditorMode = true
         isLevelReady = false
-        levelLoadingMessage = "Učitavanje mape (\(gameMap.rows)×\(gameMap.cols))…"
+        levelLoadingMessage = "Učitavanje mape (\(gameMap.displayDimensionString))…"
+        objectWillChange.send()
+        return true
     }
 
-    /// Zatvori Map Editor i vrati se na izbornik.
+    /// Otvori Map Editor s postojećom mapom zadane veličine (npr. nakon učitavanja). Ne kreira novu datoteku.
+    func openMapEditor(withPreset preset: MapSizePreset) {
+        setMapSize(preset)
+        mapEditorCurrentSlot = .solo
+        mapEditorState = MapEditorState()
+        selectedPlacementObjectId = nil
+        isShowingMainMenu = false
+        isMapEditorMode = true
+        isLevelReady = false
+        levelLoadingMessage = "Učitavanje mape (\(gameMap.displayDimensionString))…"
+        _ = saveEditorMap(toSlot: .solo)
+    }
+
+    /// Otvori Map Editor nakon učitavanja mape (mapa je već postavljena). Generira editor-only stanje i veže na mapu.
+    func openMapEditorAfterLoad() {
+        mapEditorState = MapEditorState()
+        selectedPlacementObjectId = nil
+        isShowingMainMenu = false
+        isMapEditorMode = true
+        isLevelReady = false
+        levelLoadingMessage = "Učitavanje mape (\(gameMap.displayDimensionString))…"
+    }
+
+    /// Zatvori Map Editor i vrati se na izbornik. Očisti editor-only stanje.
     func closeMapEditor() {
+        mapEditorState?.clear()
+        mapEditorState = nil
         isMapEditorMode = false
         isShowingMainMenu = true
     }
 
-    /// Spremi trenutnu mapu u Application Support (Map Editor). Vraća true ako je uspjelo.
-    func saveEditorMap() -> Bool {
-        let data = MapEditorSaveData(rows: gameMap.rows, cols: gameMap.cols, placements: gameMap.placements, cells: gameMap.cells)
-        guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("Feudalism", isDirectory: true) else { return false }
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let fileURL = dir.appendingPathComponent("map_editor_save.json")
-        guard let encoded = try? JSONEncoder().encode(data) else { return false }
-        do {
-            try encoded.write(to: fileURL)
-            return true
-        } catch {
-            return false
+    /// Spremi trenutnu mapu u slot (Maps/200x200/, …) preko MapFileManager. Sprema samo unutar projekta. Vraća (uspjeh, poruka greške za prikaz).
+    func saveEditorMap(toSlot slot: MapEditorSlot? = nil) -> (success: Bool, errorMessage: String?) {
+        let targetSlot = slot ?? mapEditorCurrentSlot ?? .solo
+        let name = mapEditorMapName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return (false, "Unesite naziv mape.") }
+        MapStorage.createSizeFoldersIfNeeded()
+        guard MapStorage.isMapsRootInProject() else {
+            FeudalismLog.log("Save map: ODBIJENO – mape se moraju spremati u projekt. Trenutni Maps root=\(MapStorage.mapsRootPath()). Postavite Working Directory = $(PROJECT_DIR).")
+            return (false, "Mape se moraju spremati unutar projekta. Postavite Xcode → Edit Scheme → Run → Options → Working Directory = $(PROJECT_DIR).")
         }
+        let fileName = MapStorage.fileName(forMapName: name, slotFallback: targetSlot)
+        let data = MapEditorSaveData(mapName: name, rows: gameMap.rows, cols: gameMap.cols, placements: gameMap.placements, cells: gameMap.cells, createdDate: mapEditorCreatedDate ?? Date())
+        guard let fileURL = MapStorage.fileURL(rows: gameMap.rows, cols: gameMap.cols, fileName: fileName) else {
+            let side = gameMap.rows * MapScale.smallCellsPerObjectCubeSide
+            return (false, "Nije moguće odrediti putanju za spremanje. Veličina mape \(gameMap.displayDimensionString) možda nije dopuštena (200, 400, 600, 800, 1000). Putanja: \(MapStorage.mapsRootPath())")
+        }
+        let (saved, saveError) = MapFileManager.save(data: data, to: fileURL)
+        FeudalismLog.log("Save map: success=\(saved), error=\(saveError ?? "—"), path=\(fileURL.path), mapsInProject=\(MapStorage.isMapsRootInProject())")
+        guard saved else { return (false, saveError ?? "Spremanje nije uspjelo.") }
+        if let rel = MapStorage.relativePath(rows: gameMap.rows, cols: gameMap.cols, fileName: fileName) {
+            let category = MapSizeCategory.from(rows: gameMap.rows, cols: gameMap.cols)
+            let entry = MapCatalogEntry(
+                path: rel,
+                rows: gameMap.rows,
+                cols: gameMap.cols,
+                slot: targetSlot.rawValue,
+                displayName: name,
+                sizeCategory: category.rawValue,
+                suggestedPlayers: targetSlot.defaultSuggestedPlayers,
+                tags: targetSlot.defaultTags
+            )
+            MapCatalog.addOrUpdate(entry: entry)
+        }
+        return (true, nil)
     }
 
-    /// Učitaj mapu iz Application Support (Map Editor). Podržana je samo 100×100. Vraća true ako je uspjelo.
-    func loadEditorMap() -> Bool {
-        guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return false }
-        let fileURL = dir.appendingPathComponent("Feudalism").appendingPathComponent("map_editor_save.json")
-        guard FileManager.default.fileExists(atPath: fileURL.path),
-              let raw = try? Data(contentsOf: fileURL),
-              let data = try? JSONDecoder().decode(MapEditorSaveData.self, from: raw) else { return false }
-        guard data.rows == gameMap.rows, data.cols == gameMap.cols else { return false }
-        gameMap.replacePlacements(data.placements)
-        if let cells = data.cells { gameMap.replaceCells(cells) }
+    /// Učitaj mapu iz kataloškog unosa preko MapFileManager. Vraća true ako je uspjelo.
+    func loadEditorMap(entry: MapCatalogEntry) -> Bool {
+        guard let root = MapStorage.mapsRoot() else { return false }
+        let fileURL = root.appendingPathComponent(entry.path)
+        guard let data = MapFileManager.load(from: fileURL) else { return false }
+        applyLoadedMapData(data)
+        mapEditorCurrentSlot = MapEditorSlot(rawValue: entry.slot) ?? .solo
+        mapEditorMapName = data.mapName
+        mapEditorCreatedDate = data.createdDate
+        mapEditorSceneVersion += 1
         objectWillChange.send()
         return true
+    }
+
+    /// Učitaj mapu iz danog slota i veličine: prvo iz kataloga (prvi unos za slot i dimenzije), inače legacy datoteka slot.fileName.
+    func loadEditorMap(fromSlot slot: MapEditorSlot, rows: Int, cols: Int) -> Bool {
+        let fromCatalog = MapCatalog.entries(forSlot: slot).first { $0.rows == rows && $0.cols == cols }
+        if let entry = fromCatalog { return loadEditorMap(entry: entry) }
+        guard let fileURL = MapStorage.fileURL(rows: rows, cols: cols, fileName: slot.fileName) else { return false }
+        guard let data = MapFileManager.load(from: fileURL) else { return false }
+        applyLoadedMapData(data)
+        mapEditorCurrentSlot = slot
+        mapEditorMapName = data.mapName
+        mapEditorCreatedDate = data.createdDate
+        mapEditorSceneVersion += 1
+        objectWillChange.send()
+        return true
+    }
+
+    /// Primijeni učitane podatke na gameMap (koristi Map Editor nakon load).
+    private func applyLoadedMapData(_ data: MapEditorSaveData) {
+        let newMap = GameMap(rows: data.rows, cols: data.cols)
+        newMap.replacePlacements(data.placements)
+        if let cells = data.cells { newMap.replaceCells(cells) }
+        gameMap = newMap
+    }
+
+    /// Učitaj prvu dostupnu mapu za dani slot (bilo koja veličina iz kataloga). Vraća true ako je uspjelo.
+    func loadEditorMap(fromSlot slot: MapEditorSlot) -> Bool {
+        guard let first = MapCatalog.entries(forSlot: slot).first else { return false }
+        return loadEditorMap(entry: first)
+    }
+
+    /// Postoji li barem jedna spremljena mapa za dani slot (bilo koja veličina)?
+    func hasEditorMap(inSlot slot: MapEditorSlot) -> Bool {
+        MapCatalog.hasAnyMap(forSlot: slot)
+    }
+
+    /// Map Editor: obriši datoteku mape i unos iz kataloga. Vraća true ako je unos uklonjen iz kataloga.
+    func deleteEditorMap(entry: MapCatalogEntry) -> Bool {
+        if let root = MapStorage.mapsRoot() {
+            let fileURL = root.appendingPathComponent(entry.path)
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+        MapCatalog.remove(path: entry.path)
+        objectWillChange.send()
+        return true
+    }
+
+    /// Map Editor: preimenuj mapu (nova datoteka, brisanje stare, ažuriranje kataloga). Vraća (uspjeh, poruka greške).
+    func renameEditorMap(entry: MapCatalogEntry, newName: String) -> (success: Bool, errorMessage: String?) {
+        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return (false, "Unesite naziv mape.") }
+        guard let root = MapStorage.mapsRoot() else { return (false, "Mape nisu dostupne.") }
+        let fileURL = root.appendingPathComponent(entry.path)
+        guard let data = MapFileManager.load(from: fileURL) else { return (false, "Učitavanje mape nije uspjelo.") }
+        let slot = MapEditorSlot(rawValue: entry.slot) ?? .solo
+        let fileName = MapStorage.fileName(forMapName: name, slotFallback: slot)
+        guard let newURL = MapStorage.fileURL(rows: data.rows, cols: data.cols, fileName: fileName) else {
+            return (false, "Neispravna veličina mape.")
+        }
+        let newData = MapEditorSaveData(mapName: name, rows: data.rows, cols: data.cols, placements: data.placements, cells: data.cells, createdDate: data.createdDate)
+        let (saved, saveError) = MapFileManager.save(data: newData, to: newURL)
+        guard saved else { return (false, saveError ?? "Spremanje nije uspjelo.") }
+        if let rel = MapStorage.relativePath(rows: data.rows, cols: data.cols, fileName: fileName) {
+            let category = MapSizeCategory.from(rows: data.rows, cols: data.cols)
+            let newEntry = MapCatalogEntry(path: rel, rows: data.rows, cols: data.cols, slot: entry.slot, displayName: name, sizeCategory: category.rawValue, suggestedPlayers: entry.suggestedPlayers, tags: entry.tags)
+            MapCatalog.addOrUpdate(entry: newEntry)
+        }
+        try? FileManager.default.removeItem(at: fileURL)
+        MapCatalog.remove(path: entry.path)
+        objectWillChange.send()
+        return (true, nil)
     }
 
     /// Map Editor: obriši sve objekte s mape.

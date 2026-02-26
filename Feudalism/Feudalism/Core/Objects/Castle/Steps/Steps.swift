@@ -25,7 +25,8 @@ enum Steps: PlaceableSceneKitObject {
         )
     }
 
-    private static let baseSize: CGFloat = 40
+    /// 1 ćelija = MapScale.objectCubeWorldUnits (40×40 world).
+    private static var baseSize: CGFloat { MapScale.objectCubeWorldUnits }
     private static let shapeHeight: CGFloat = 400
 
     static func loadSceneKitNode(from bundle: Bundle = .main) -> SCNNode? {

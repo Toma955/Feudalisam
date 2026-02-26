@@ -254,10 +254,11 @@ struct MapEditorView: View {
             .buttonStyle(.plain)
 
             Button {
-                if gameState.saveEditorMap() {
+                let result = gameState.saveEditorMap()
+                if result.success {
                     saveLoadMessage = "Mapa spremljena."
                 } else {
-                    saveLoadMessage = "Spremanje nije uspjelo."
+                    saveLoadMessage = result.errorMessage ?? "Spremanje nije uspjelo."
                 }
                 showSaveLoadAlert = true
             } label: {
@@ -268,7 +269,7 @@ struct MapEditorView: View {
             .buttonStyle(.plain)
 
             Button {
-                if gameState.loadEditorMap() {
+                if gameState.loadEditorMap(fromSlot: .solo) {
                     saveLoadMessage = "Mapa učitana."
                 } else {
                     saveLoadMessage = "Učitavanje nije uspjelo (nema datoteke ili format)."

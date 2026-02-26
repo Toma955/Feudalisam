@@ -224,7 +224,6 @@ struct ContentView: View {
     @State private var bottomBarTransitionFromRight: Bool = true
     @State private var contentAreaWidth: CGFloat = 830
     @State private var showGrid = true
-    @State private var handPanMode = false
     @State private var showPivotIndicator = false
     @State private var showSettingsPopover = false
     @StateObject private var placementConsole = PlacementDebugConsole.shared
@@ -249,7 +248,7 @@ struct ContentView: View {
             topBar: { gameHUD },
             content: {
                 ZStack {
-                    SceneKitMapView(showGrid: showGrid, handPanMode: $handPanMode, showPivotIndicator: showPivotIndicator)
+                    SceneKitMapView(showGrid: showGrid, handPanMode: .constant(false), showPivotIndicator: showPivotIndicator)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .ignoresSafeArea()
 
@@ -667,7 +666,7 @@ struct ContentView: View {
         }
     }
 
-    /// Mini prozor iz gear gumba: Ruka, Pivot, Ćelije (sukladno temi). Zoom ostaje na traci.
+    /// Mini prozor iz gear gumba: Pivot, Ćelije (sukladno temi). Zoom ostaje na traci.
     private var settingsPopoverContent: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Kamera i prikaz")
@@ -675,15 +674,6 @@ struct ContentView: View {
                 .foregroundStyle(.white.opacity(0.95))
             Divider().background(.white.opacity(0.3))
             HStack(spacing: 8) {
-                Button {
-                    handPanMode.toggle()
-                } label: {
-                    Label(handPanMode ? "Ruka uklj." : "Ruka", systemImage: handPanMode ? "hand.draw.fill" : "hand.draw")
-                        .font(.caption)
-                }
-                .buttonStyle(.bordered)
-                .tint(handPanMode ? .yellow.opacity(0.4) : .white.opacity(0.2))
-                .foregroundStyle(handPanMode ? .yellow : .white.opacity(0.9))
                 Button {
                     showPivotIndicator.toggle()
                 } label: {

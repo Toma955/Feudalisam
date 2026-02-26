@@ -12,8 +12,10 @@ import SceneKit
 
 /// Zajednička implementacija zida: geometrija, teksture, materijali.
 /// Razlika između tipova (HugeWall / SmallWall) bit će visina, resursi i život.
+/// Dimenzija baze zida (1 ćelija) = MapScale.objectCubeWorldUnits (40×40 world jedinica).
 enum ParentWall {
-    static let cubeSize: CGFloat = 40
+    /// Jedan izvor istine: 1 ćelija mape = 40×40 world; usklađeno s MapScale i SceneKitMapView.
+    static var cubeSize: CGFloat { MapScale.objectCubeWorldUnits }
     static let defaultWallHeight: CGFloat = 400
     private static let wallColor = NSColor(red: 0.45, green: 0.32, blue: 0.22, alpha: 1)
 
