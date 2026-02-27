@@ -38,11 +38,8 @@ private let editorBottomBarSpacing: CGFloat = 12
 
 struct MapEditorView: View {
     @EnvironmentObject private var gameState: GameState
-    @StateObject private var mapEditorConsole = MapEditorConsole.shared
-    @State private var showConsole = true
-    @State private var gridShow10 = true
+    @State private var gridShow10 = false
     @State private var gridShow40 = false
-    @State private var showGridDots = false
     @State private var handPanMode = false
     @State private var eraseMode = false
     @State private var saveLoadMessage: String?
@@ -50,18 +47,15 @@ struct MapEditorView: View {
     @State private var selectedEditorCategory: MapEditorBottomCategory = .građevine
     @State private var terrainToolOption: TerrainToolOption = .raise5
     @State private var terrainBrushOption: TerrainBrushOption = .size1
-    /// Mod „Odabir ćelija”: klik označuje/uklanja ćeliju; zatim Podigni označene +50/+100.
-    @State private var isCellSelectionMode = false
 
     var body: some View {
         MapScreenLayout(
             topBar: { editorToolbar },
             content: {
                 SceneKitMapView(
-                    showGrid: true,
+                    showGrid: gridShow10 || gridShow40,
                     gridShow10: gridShow10,
                     gridShow40: gridShow40,
-                    showGridDots: showGridDots,
                     handPanMode: $handPanMode,
                     isEraseMode: eraseMode,
                     onRemoveAt: eraseMode ? { gameState.removePlacement(at: MapCoordinate(row: $0, col: $1)) } : nil,
@@ -69,17 +63,18 @@ struct MapEditorView: View {
                     terrainTool: selectedEditorCategory == .teren ? terrainToolOption : nil,
                     terrainBrushOption: selectedEditorCategory == .teren ? terrainBrushOption : nil,
                     onTerrainEdit: nil,
-                    onTerrainAddBrushSelection: (selectedEditorCategory == .teren && !isCellSelectionMode) ? { r, c in
+                    onTerrainAddBrushSelection: selectedEditorCategory == .teren ? { r, c in
                         gameState.applyTerrainElevation(centerRow: r, centerCol: c, tool: terrainToolOption, brushOption: terrainBrushOption)
                     } : nil,
-                    onCellSelectionToggle: (selectedEditorCategory == .teren && isCellSelectionMode) ? { r, c in
-                        gameState.mapEditorState?.toggleCellSelection(MapCoordinate(row: r, col: c))
-                    } : nil,
-                    isCellSelectionMode: isCellSelectionMode
+                    onCellSelectionToggle: nil,
+                    isCellSelectionMode: false,
+                    onVertexDotSelected: nil,
+                    onExitTerrainEditMode: selectedEditorCategory == .teren ? { selectedEditorCategory = .građevine } : nil
                 )
                 .ignoresSafeArea()
             },
-            loadingMessage: gameState.isLevelReady ? nil : (gameState.levelLoadingMessage ?? "Učitavanje mape…"),
+            loadingMessage: nil,
+            darkBackground: false,
             customOverlay: {
                 ZStack(alignment: .bottom) {
                     // Status teksture samo kad nije u redu (greška); kad je OK – ništa ne prikazujemo
@@ -106,60 +101,12 @@ struct MapEditorView: View {
                     // Donji mini izbornik: sivi okrugli gumbi s ikonama
                     editorBottomBar
                         .padding(.bottom, 16)
-
-                    // Konzola Map Editora (selector, hit test, stanje)
-                    VStack(alignment: .trailing, spacing: 4) {
-                        if !showConsole {
-                            Button("Konzola ▶") { showConsole = true }
-                                .font(.system(size: 11))
-                                .foregroundStyle(.white.opacity(0.7))
-                                .padding(8)
-                        }
-                        if showConsole {
-                            VStack(alignment: .leading, spacing: 0) {
-                                HStack {
-                                    Text("Konzola")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(.white.opacity(0.9))
-                                    Spacer()
-                                    Button("Očisti") { mapEditorConsole.clear() }
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.white.opacity(0.8))
-                                    Button("▼") { showConsole = false }
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.white.opacity(0.8))
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(Color.black.opacity(0.7))
-                                ScrollView(.vertical, showsIndicators: true) {
-                                    LazyVStack(alignment: .leading, spacing: 2) {
-                                        ForEach(Array(mapEditorConsole.lines.enumerated()), id: \.offset) { _, line in
-                                            Text(line)
-                                                .font(.system(size: 10).monospaced())
-                                                .foregroundStyle(.green.opacity(0.95))
-                                                .textSelection(.enabled)
-                                                .frame(maxWidth: .infinity, alignment: .leading)
-                                        }
-                                    }
-                                    .padding(8)
-                                }
-                                .frame(height: 140)
-                                .background(Color.black.opacity(0.85))
-                            }
-                            .frame(maxWidth: 320)
-                            .cornerRadius(8)
-                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.2), lineWidth: 1))
-                        }
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.clear) // eksplicitno prozirno – bez implicitnog zatamnjenja kad je Teren odabran
             }
         )
         .onAppear {
-            mapEditorConsole.append("Map Editor učitan. Odaberi Teren i veličinu kockice (1×1, 3×3, 6×6, 12×12).")
             PlacementDebugConsole.verbose = true
             let (ok, message) = HugeWall.checkAndLogTextureStatus(bundle: .main)
             gameState.wallTextureStatus = ok ? "OK" : message
@@ -171,27 +118,41 @@ struct MapEditorView: View {
         }
     }
 
-    /// Panel opcija za teren: mod Odabir ćelija, Podigni/Spusti/Izravnaj, Podigni označene +50/+100.
+    /// Panel opcija za teren: četkica (element/ćelija), alati Podigni/Spusti/Izravnaj.
     private var terrainToolPanel: some View {
-        let selectedCount = gameState.mapEditorState?.selectedCells.count ?? 0
-        let hasSelection = selectedCount > 0
+        let selectedVertex = gameState.mapEditorState?.selectedVertex
         return VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Toggle(isOn: $isCellSelectionMode) {
-                    Text("Odabir ćelija")
+            Text("Visina: Element (ćelija) = četkica na mapi. Precizno (4 točke) = uključi Točke i klikni vrh.")
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(.white.opacity(0.75))
+            if let v = selectedVertex {
+                HStack(spacing: 10) {
+                    Text("Točka \(v.row),\(v.col)")
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(.yellow)
+                    ForEach(TerrainToolOption.allCases, id: \.rawValue) { option in
+                        Button {
+                            gameState.applyVertexElevation(vertexRow: v.row, vertexCol: v.col, tool: option)
+                        } label: {
+                            Text(option.rawValue)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.9))
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.white.opacity(0.2))
+                    }
+                    Button("Odznači") {
+                        gameState.mapEditorState?.selectedVertex = nil
+                        gameState.mapEditorState?.objectWillChange.send()
+                        gameState.objectWillChange.send()
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.8))
+                    .buttonStyle(.bordered)
+                    .tint(.white.opacity(0.15))
                 }
-                .toggleStyle(.button)
-                .buttonStyle(.bordered)
-                .tint(isCellSelectionMode ? Color.yellow.opacity(0.4) : Color.white.opacity(0.15))
-                .help("Uključi da klik na mapu označi/ukloni ćeliju; zatim Podigni označene +50 ili +100")
-
-                if hasSelection {
-                    Text("\(selectedCount) označeno")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.7))
-                }
+                .padding(8)
+                .background(Color.yellow.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
             }
             HStack(spacing: 10) {
                 ForEach(TerrainToolOption.allCases, id: \.rawValue) { option in
@@ -207,34 +168,6 @@ struct MapEditorView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
                     .buttonStyle(.plain)
-                }
-                if hasSelection {
-                    Button {
-                        gameState.applyTerrainElevationToSelectedCells(tool: .raise5)
-                    } label: {
-                        Text("Podigni označene +50")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.95))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.green.opacity(0.35))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                    }
-                    .buttonStyle(.plain)
-                    .help("Podigni sve označene ćelije za 50")
-                    Button {
-                        gameState.applyTerrainElevationToSelectedCells(tool: .raise10)
-                    } label: {
-                        Text("Podigni označene +100")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.95))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.green.opacity(0.35))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                    }
-                    .buttonStyle(.plain)
-                    .help("Podigni sve označene ćelije za 100")
                 }
             }
         }
@@ -329,7 +262,7 @@ struct MapEditorView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-                .help("Odaberi veličinu kockice: klik na mapu primjenjuje trenutni alat (Podigni/Spusti/Izravnaj) na to područje.")
+                .help("Visina elementa (ćelija): veličina četkice. Klik na mapu mijenja visinu cijele ćelije ili područja.")
                 HUDBarDivider()
             }
 
@@ -415,14 +348,6 @@ struct MapEditorView: View {
             }
             .buttonStyle(.plain)
 
-            Button {
-                showGridDots.toggle()
-            } label: {
-                Text("Kugle")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(showGridDots ? .yellow : .white.opacity(0.9))
-            }
-            .buttonStyle(.plain)
         }
     }
 }

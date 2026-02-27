@@ -343,8 +343,8 @@ struct MapEditorChoiceView: View {
             Button {
                 let name = createMapName.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !name.isEmpty else { return }
-                if gameState.createMapAndOpenEditor(name: name, side: preset.side) {
-                    isPresented = false
+                gameState.createMapAndOpenEditor(name: name, side: preset.side) { success in
+                    if success { isPresented = false }
                 }
             } label: {
                 Text("Generiraj mapu")

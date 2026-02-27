@@ -84,9 +84,9 @@ enum MapScale {
     }
 }
 
-// MARK: - Generator mape (nova mapa; delegira MapFileManageru)
+// MARK: - Generator mape (nova mapa)
 enum MapGenerator {
-    /// Kreira prvu (praznu) mapu i file preko MapFileManager.createMapFile.
+    /// Kreira prvu (praznu) mapu i file preko MapFileManager.createMapFile (sinkrono – može blokirati glavnu nit).
     static func createAndSaveMap(name: String, side: Int, slot: MapEditorSlot = .solo) -> GameMap? {
         MapFileManager.createMapFile(name: name, side: side, slot: slot)
     }
@@ -94,5 +94,59 @@ enum MapGenerator {
     /// Kreira prvu mapu s enumom dimenzije (npr. .size200 → 200×200). Isto što createAndSaveMap(name:side:slot:) s dimension.side.
     static func createAndSaveMap(name: String, dimension: MapDimension, slot: MapEditorSlot = .solo) -> GameMap? {
         createAndSaveMap(name: name, side: dimension.side, slot: slot)
+    }
+
+    /// Kreira mapu na pozadinskom threadu (igra ne zastaje), sprema u file, na main thread pozove completion s GameMap ili nil.
+    static func createAndSaveMapAsync(name: String, side: Int, slot: MapEditorSlot = .solo, completion: @escaping (GameMap?) -> Void) {
+        guard MapScale.isValidMapSide(side) else { DispatchQueue.main.async { completion(nil) }; return }
+        let nameTrimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !nameTrimmed.isEmpty else { DispatchQueue.main.async { completion(nil) }; return }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let rows = MapCreationRules.rows(forPresetSide: side)
+            let cols = MapCreationRules.cols(forPresetSide: side)
+            let cells = GameMap.makeGrid(rows: rows, cols: cols)
+            let vertexHeights = GameMap.makeInitialVertexHeights(rows: rows, cols: cols)
+            let gameMap = GameMap(rows: rows, cols: cols, cells: cells, vertexHeights: vertexHeights)
+            let vertexHeightsDouble = Dictionary(uniqueKeysWithValues: vertexHeights.map { ($0.key, Double($0.value)) })
+            let data = MapEditorSaveData(
+                mapName: nameTrimmed,
+                rows: rows,
+                cols: cols,
+                placements: [],
+                cells: cells,
+                createdDate: Date(),
+                originOffsetX: 0,
+                originOffsetZ: 0,
+                vertexHeights: vertexHeightsDouble
+            )
+            let fileName = MapStorage.fileName(forMapName: nameTrimmed, slotFallback: slot)
+            guard let fileURL = MapStorage.fileURL(side: side, fileName: fileName) else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            MapStorage.createSizeFoldersIfNeeded()
+
+            DispatchQueue.global(qos: .utility).async {
+                let (saved, _) = MapFileManager.save(data: data, to: fileURL)
+                DispatchQueue.main.async {
+                    if saved, let rel = MapStorage.relativePath(side: side, fileName: fileName) {
+                        let category = MapSizeCategory.from(rows: rows, cols: cols)
+                        let entry = MapCatalogEntry(
+                            path: rel,
+                            rows: rows,
+                            cols: cols,
+                            slot: slot.rawValue,
+                            displayName: nameTrimmed,
+                            sizeCategory: category.rawValue,
+                            suggestedPlayers: slot.defaultSuggestedPlayers,
+                            tags: slot.defaultTags
+                        )
+                        MapCatalog.addOrUpdate(entry: entry)
+                    }
+                    completion(saved ? gameMap : nil)
+                }
+            }
+        }
     }
 }

@@ -210,9 +210,12 @@ struct SoloSetupView: View {
                 ZStack {
                     if mapEntriesForCurrentSize.isEmpty {
                         Button {
-                            selectedMapType = .procedural
+                            let radniNaziv = "Mapa_\(selectedMapSize.side)x\(selectedMapSize.side)"
+                            gameState.createMapAndOpenEditor(name: radniNaziv, side: selectedMapSize.side) { success in
+                                if success { isPresented = false }
+                            }
                         } label: {
-                            Text(LocalizedStrings.string(for: "solo_map_generate", language: gameState.appLanguage))
+                            Text("Kreiraj mapu")
                                 .font(.system(size: 15, weight: .medium))
                                 .foregroundStyle(.white)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -220,6 +223,7 @@ struct SoloSetupView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: soloSetupCornerRadius, style: .continuous))
                         }
                         .buttonStyle(.plain)
+                        .help("Nema spremljenih mapa. Kreira se mapa s radnim nazivom; pričekaj da se sve učita, pa uredi u Map Editoru.")
                         .transition(.opacity)
                     }
                     if !mapEntriesForCurrentSize.isEmpty {
@@ -319,36 +323,22 @@ struct SoloSetupView: View {
     }
 
     private var pokreniButton: some View {
-        Button {
+        let hasMaps = !mapEntriesForCurrentSize.isEmpty
+        return Button {
+            guard hasMaps else { return }
             AudioManager.shared.stopIntroSoundtrack()
             let mapsForSize = MapCatalog.entries(forSide: selectedMapSize.side)
-            if !mapsForSize.isEmpty {
-                let entry = mapsForSize[min(selectedMapIndex, mapsForSize.count - 1)]
-                gameState.startSoloWithMapEntry(
-                    entry: entry,
-                    initialGold: initialGold,
-                    initialWood: initialWood,
-                    initialIron: initialIron,
-                    initialStone: initialStone,
-                    initialFood: initialFood,
-                    initialHop: initialHop,
-                    initialHay: initialHay
-                )
-            } else {
-                gameState.startNewGameWithSetup(
-                    humanName: "Igrač",
-                    selectedAIProfileIds: [],
-                    mapSize: selectedMapSize,
-                    initialGold: initialGold,
-                    initialWood: initialWood,
-                    initialIron: initialIron,
-                    initialStone: initialStone,
-                    initialFood: initialFood,
-                    initialHop: initialHop,
-                    initialHay: initialHay,
-                    soloLevelName: selectedMapType.levelName
-                )
-            }
+            let entry = mapsForSize[min(selectedMapIndex, mapsForSize.count - 1)]
+            gameState.startSoloWithMapEntry(
+                entry: entry,
+                initialGold: initialGold,
+                initialWood: initialWood,
+                initialIron: initialIron,
+                initialStone: initialStone,
+                initialFood: initialFood,
+                initialHop: initialHop,
+                initialHay: initialHay
+            )
             isPresented = false
         } label: {
             HStack(spacing: 8) {
@@ -357,12 +347,14 @@ struct SoloSetupView: View {
                     .font(.system(size: 15, weight: .semibold))
             }
             .font(.system(size: 16, weight: .semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(hasMaps ? .white : .white.opacity(0.5))
             .frame(minWidth: 102, minHeight: 48)
-            .background(Color.green)
+            .background(hasMaps ? Color.green : Color.green.opacity(0.4))
             .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         }
         .buttonStyle(.plain)
+        .disabled(!hasMaps)
+        .help(hasMaps ? "Pokreni solo igru s odabranom mapom." : "Prvo kreiraj mapu (gumb „Kreiraj mapu” u odabiru veličine).")
     }
 
     // MARK: - Resursi: tablica (grid) – 24 ostalih, zadnji red samo oružje (6)

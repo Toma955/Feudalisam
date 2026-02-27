@@ -113,6 +113,8 @@
 				F0DDE37E2F49808C00D1017C /* Copy Corn model + texture */,
 				F0DDE3832F49808C00D1017C /* Copy Iron model + texture */,
 				F0DDE3842F49808C00D1017C /* Copy Stone model + texture */,
+				F0DDE3852F49808C00D1017C /* Copy ground texture */,
+				F0DDE3862F49808C00D1017C /* Copy Side texture */,
 			);
 			buildRules = (
 			);
@@ -429,6 +431,39 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "set -e\nRES=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources\"\nSTONE=\"$RES/Core/Objects/Industry/Stone\"\nmkdir -p \"$STONE\"\nSRC=\"${SRCROOT}/Feudalism/Core/Objects/Industry/Stone\"\ncp \"$SRC/\"*.obj \"$STONE/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$STONE/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$STONE/\" 2>/dev/null || true\nmkdir -p \"$RES/Stone\"\ncp \"$SRC/\"*.obj \"$RES/Stone/\" 2>/dev/null || true\ncp \"$SRC/\"*.mtl \"$RES/Stone/\" 2>/dev/null || true\ncp \"$SRC/\"*.png \"$RES/Stone/\" 2>/dev/null || true\n";
+		};
+		F0DDE3852F49808C00D1017C /* Copy ground texture */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Feudalism/Core/Objects/Textures/ground/ground_Color.jpg",
+				"$(SRCROOT)/Feudalism/Core/Objects/Textures/ground/ground_NormalGL.jpg",
+				"$(SRCROOT)/Feudalism/Core/Objects/Textures/ground/ground_Roughness.jpg",
+			);
+			name = "Copy ground texture";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nRES=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources\"\nGROUND=\"$RES/Core/Objects/Textures/ground\"\nmkdir -p \"$GROUND\"\nSRC=\"${SRCROOT}/Feudalism/Core/Objects/Textures/ground\"\ncp \"$SRC/\"*.jpg \"$GROUND/\" 2>/dev/null || true\n";
+		};
+		F0DDE3862F49808C00D1017C /* Copy Side texture */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Feudalism/Core/Objects/Textures/side/side.png",
+				"$(SRCROOT)/Feudalism/Core/Objects/Textures/side/side_Color.jpg",
+			);
+			name = "Copy Side texture";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nRES=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Resources\"\nSIDE=\"$RES/Core/Objects/Textures/side\"\nmkdir -p \"$SIDE\"\nSRC=\"${SRCROOT}/Feudalism/Core/Objects/Textures/side\"\ncp \"$SRC/\"*.png \"$SIDE/\" 2>/dev/null || true\ncp \"$SRC/\"*.jpg \"$SIDE/\" 2>/dev/null || true\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

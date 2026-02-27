@@ -403,6 +403,7 @@ final class GameState: ObservableObject {
         let newMap = GameMap(rows: data.rows, cols: data.cols)
         newMap.replacePlacements(data.placements)
         if let cells = data.cells { newMap.replaceCells(cells) }
+        if let vh = data.vertexHeights { newMap.replaceVertexHeights(Dictionary(uniqueKeysWithValues: vh.map { ($0.key, CGFloat($0.value)) })) }
         newMap.originOffsetX = CGFloat(data.originOffsetX ?? 0)
         newMap.originOffsetZ = CGFloat(data.originOffsetZ ?? 0)
         gameMap = newMap
@@ -497,23 +498,26 @@ enum MapEditorSlot: String, CaseIterable, Identifiable {
 }
 
 extension GameState {
-    /// Kreira mapu preko MapGenerator (jedna dimenzija side = kockasta mapa), sprema je u Maps/side×side/ i otvori Map Editor. Naziv mape treba biti već postavljen.
-    func createMapAndOpenEditor(name: String, side: Int) -> Bool {
-        guard let newMap = MapGenerator.createAndSaveMap(name: name, side: side, slot: .solo) else { return false }
-        gameMap = newMap
-        mapEditorCurrentSlot = .solo
-        mapEditorMapName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        mapEditorCreatedDate = Date()
-        mapEditorState = MapEditorState()
-        bindMapEditorStateChanges()
-        mapEditorSceneVersion += 1
-        selectedPlacementObjectId = nil
-        isShowingMainMenu = false
-        isMapEditorMode = true
-        isLevelReady = false
-        levelLoadingMessage = "Učitavanje mape (\(gameMap.displayDimensionString))…"
-        objectWillChange.send()
-        return true
+    /// Kreira mapu na pozadinskom threadu (igra ne zastaje), sprema je u Maps/side×side/ i otvori Map Editor. Na main thread pozove completion(success).
+    /// Map Editor se prikazuje samo kad mapa postoji; pričekaj da se sve učita (isLevelReady) prije uređivanja.
+    func createMapAndOpenEditor(name: String, side: Int, completion: @escaping (Bool) -> Void) {
+        MapGenerator.createAndSaveMapAsync(name: name, side: side, slot: .solo) { [weak self] newMap in
+            guard let self = self, let newMap = newMap else { completion(false); return }
+            self.gameMap = newMap
+            self.mapEditorCurrentSlot = .solo
+            self.mapEditorMapName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.mapEditorCreatedDate = Date()
+            self.mapEditorState = MapEditorState()
+            self.bindMapEditorStateChanges()
+            self.mapEditorSceneVersion += 1
+            self.selectedPlacementObjectId = nil
+            self.isShowingMainMenu = false
+            self.isMapEditorMode = true
+            self.isLevelReady = false
+            self.levelLoadingMessage = "Kreiranje i učitavanje mape (\(newMap.displayDimensionString))…"
+            self.objectWillChange.send()
+            completion(true)
+        }
     }
 
     /// Otvori Map Editor s postojećom mapom zadane veličine (npr. nakon učitavanja). Ne kreira novu datoteku.
@@ -562,7 +566,8 @@ extension GameState {
             return (false, "Mape se moraju spremati unutar projekta. Postavite Xcode → Edit Scheme → Run → Options → Working Directory = $(PROJECT_DIR).")
         }
         let fileName = MapStorage.fileName(forMapName: name, slotFallback: targetSlot)
-        let data = MapEditorSaveData(mapName: name, rows: gameMap.rows, cols: gameMap.cols, placements: gameMap.placements, cells: gameMap.cells, createdDate: mapEditorCreatedDate ?? Date(), originOffsetX: Double(gameMap.originOffsetX), originOffsetZ: Double(gameMap.originOffsetZ))
+        let vertexHeightsDouble = gameMap.vertexHeights.isEmpty ? nil : Dictionary(uniqueKeysWithValues: gameMap.vertexHeights.map { ($0.key, Double($0.value)) })
+        let data = MapEditorSaveData(mapName: name, rows: gameMap.rows, cols: gameMap.cols, placements: gameMap.placements, cells: gameMap.cells, createdDate: mapEditorCreatedDate ?? Date(), originOffsetX: Double(gameMap.originOffsetX), originOffsetZ: Double(gameMap.originOffsetZ), vertexHeights: vertexHeightsDouble)
         guard let fileURL = MapStorage.fileURL(rows: gameMap.rows, cols: gameMap.cols, fileName: fileName) else {
             let side = gameMap.rows * MapScale.smallCellsPerObjectCubeSide
             return (false, "Nije moguće odrediti putanju za spremanje. Veličina mape \(gameMap.displayDimensionString) možda nije dopuštena (200, 400, 600, 800, 1000). Putanja: \(MapStorage.mapsRootPath())")
@@ -621,6 +626,7 @@ extension GameState {
         let newMap = GameMap(rows: data.rows, cols: data.cols)
         newMap.replacePlacements(data.placements)
         if let cells = data.cells { newMap.replaceCells(cells) }
+        if let vh = data.vertexHeights { newMap.replaceVertexHeights(Dictionary(uniqueKeysWithValues: vh.map { ($0.key, CGFloat($0.value)) })) }
         newMap.originOffsetX = CGFloat(data.originOffsetX ?? 0)
         newMap.originOffsetZ = CGFloat(data.originOffsetZ ?? 0)
         gameMap = newMap
@@ -660,7 +666,7 @@ extension GameState {
         guard let newURL = MapStorage.fileURL(rows: data.rows, cols: data.cols, fileName: fileName) else {
             return (false, "Neispravna veličina mape.")
         }
-        let newData = MapEditorSaveData(mapName: name, rows: data.rows, cols: data.cols, placements: data.placements, cells: data.cells, createdDate: data.createdDate, originOffsetX: data.originOffsetX, originOffsetZ: data.originOffsetZ)
+        let newData = MapEditorSaveData(mapName: name, rows: data.rows, cols: data.cols, placements: data.placements, cells: data.cells, createdDate: data.createdDate, originOffsetX: data.originOffsetX, originOffsetZ: data.originOffsetZ, vertexHeights: data.vertexHeights)
         let (saved, saveError) = MapFileManager.save(data: newData, to: newURL)
         guard saved else { return (false, saveError ?? "Spremanje nije uspjelo.") }
         if let rel = MapStorage.relativePath(rows: data.rows, cols: data.cols, fileName: fileName) {
@@ -785,6 +791,23 @@ extension GameState {
             guard gameMap.isValid(coord) else { continue }
             gameMap.setHeight(at: coord, height)
         }
+        objectWillChange.send()
+    }
+
+    /// Primijeni alat za teren samo na jedan vrh (točku sjecišta). Map Editor – odabrana kugla.
+    func applyVertexElevation(vertexRow: Int, vertexCol: Int, tool: TerrainToolOption) {
+        guard gameMap.isValidVertex(vertexRow: vertexRow, vertexCol: vertexCol) else { return }
+        let step = MapScale.worldUnitsPerElevationStep
+        let current = gameMap.vertexHeightAt(vertexRow: vertexRow, vertexCol: vertexCol)
+        let newHeight: CGFloat
+        switch tool {
+        case .raise5: newHeight = current + 5 * step
+        case .raise10: newHeight = current + 10 * step
+        case .lower5: newHeight = current - 5 * step
+        case .lower10: newHeight = current - 10 * step
+        case .flatten: newHeight = current
+        }
+        gameMap.setVertexHeight(vertexRow: vertexRow, vertexCol: vertexCol, newHeight)
         objectWillChange.send()
     }
 

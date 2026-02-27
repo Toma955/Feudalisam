@@ -33,6 +33,8 @@ final class MapEditorState: ObservableObject {
     @Published var hoveredCell: MapCoordinate?
     /// Označene ćelije za precizno uređivanje visine (klik u modu „Odabir ćelija”).
     @Published var selectedCells: Set<MapCoordinate> = []
+    /// Odabrana točka sjecišta (vertex) – jedna kugla = jedan vrh; pomicanje gore/dolje samo ta točka.
+    @Published var selectedVertex: (row: Int, col: Int)?
     /// Koordinate prikaza četkice (brush preview) – prikazuje se na sceni.
     @Published var brushPreviewCells: [MapCoordinate] = []
     /// Privremena delta visine za prikaz (npr. +5 dok korisnik drži četkicu).
@@ -94,6 +96,7 @@ final class MapEditorState: ObservableObject {
         selectedCell = nil
         hoveredCell = nil
         selectedCells = []
+        selectedVertex = nil
         brushPreviewCells = []
         tempHeightDelta = 0
         paintMask = []

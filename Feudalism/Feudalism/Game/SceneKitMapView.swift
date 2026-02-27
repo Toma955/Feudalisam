@@ -41,17 +41,26 @@ private func placementDebug(_ msg: String) {
     placementDebugLog(msg)
 }
 
-/// Piksela po logičkoj ćeliji – veće = oštrija tekstura pri zumiranju (24 = 2400×2400 px).
-private let terrainTextureScale = 24
+/// Piksela po logičkoj ćeliji – veće = oštrija tekstura (max 24). Za velike mape smanjujemo da CGContext ne padne.
+private let terrainTextureScaleBase = 24
+/// Maksimalna stranica composite slike da ne alociramo previše (npr. 200×24 = 4800 → preveliko).
+private let terrainTextureMaxSide = 2048
 
-/// Proceduralna tekstura (siva/bijela pozadina). Ako nisu zadani rows/cols, koristi 200×200 (zadano).
+private func terrainTextureScale(rows: Int, cols: Int) -> Int {
+    let side = max(rows, cols, 1)
+    let scale = terrainTextureScaleBase
+    if side * scale <= terrainTextureMaxSide { return scale }
+    return max(1, terrainTextureMaxSide / side)
+}
+
+/// Proceduralna tekstura (siva pozadina). Koristi capped scale za velike mape.
 private func makeTerrainCGImage(rows: Int? = nil, cols: Int? = nil) -> CGImage? {
-    let scale = terrainTextureScale
     let c = cols ?? 200
     let r = rows ?? 200
+    let scale = terrainTextureScale(rows: r, cols: c)
     let w = c * scale
     let h = r * scale
-    guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+    guard w > 0, h > 0, let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
                              space: CGColorSpaceCreateDeviceRGB(),
                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
     let gray: CGFloat = 0.42
@@ -60,14 +69,14 @@ private func makeTerrainCGImage(rows: Int? = nil, cols: Int? = nil) -> CGImage? 
     return ctx.makeImage()
 }
 
-/// Gradi teksturu terena iz GameMap: svaka ćelija dobiva tilabilnu sliku prema cell.terrain (voda, trava, šuma, planina). Bez tilea = bijela pozadina.
+/// Gradi teksturu terena iz GameMap: svaka ćelija dobiva tile prema cell.terrain. Scale se ograniči da 200×200 ne napravi 4800×4800 (preveliko).
 private func makeTerrainCGImage(gameMap: GameMap, tileImages: [TerrainType: CGImage]) -> CGImage? {
-    let scale = terrainTextureScale
     let rows = gameMap.rows
     let cols = gameMap.cols
+    let scale = terrainTextureScale(rows: rows, cols: cols)
     let w = cols * scale
     let h = rows * scale
-    guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+    guard w > 0, h > 0, let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
                              space: CGColorSpaceCreateDeviceRGB(),
                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
     let gray: CGFloat = 0.42
@@ -88,38 +97,61 @@ private func makeTerrainCGImage(gameMap: GameMap, tileImages: [TerrainType: CGIm
     return ctx.makeImage()
 }
 
-/// Tekstura terena s .nearest da pri zumiranju ostane oštra (bez razmazivanja).
-/// Ako je gameMap != nil i useWhiteBackground == false, koriste se učitane teksture (voda, vegetacija, …). U Map Editoru: useWhiteBackground true → pozadina; dimenzije iz gameMap da tekstura odgovara 40×40 ćelijama.
+/// Tekstura terena: kao Wall – NSImage za diffuse. Composite iz tilea; za velike mape scale je ograničen da ne padne.
 private func makeTerrainTexture(gameMap: GameMap? = nil, useWhiteBackground: Bool = false) -> Any? {
     if useWhiteBackground {
-        let rows = gameMap?.rows
-        let cols = gameMap?.cols
+        let rows = gameMap?.rows ?? 200
+        let cols = gameMap?.cols ?? 200
         guard let cg = makeTerrainCGImage(rows: rows, cols: cols) else { return terrainFallbackColor }
-        let skTex = SKTexture(cgImage: cg)
-        skTex.filteringMode = .nearest
-        return skTex
+        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
     }
-    if let map = gameMap, !map.cells.isEmpty {
-        let tiles = TerrainTextureLoader.shared.tileImages(bundle: .main)
+    let tiles = TerrainTextureLoader.shared.tileImages(bundle: .main)
+    if let map = gameMap, map.rows > 0, map.cols > 0 {
         if let cg = makeTerrainCGImage(gameMap: map, tileImages: tiles) {
-            let skTex = SKTexture(cgImage: cg)
-            skTex.filteringMode = .nearest
-            return skTex
+            return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+        }
+        /// Ako composite nije uspio (npr. memorija), ispuni tilanjem ground tilea da ne ostane siva.
+        if let grassTile = tiles[.grass], let cg = makeTiledGroundImage(tile: grassTile, size: terrainTextureMaxSide) {
+            return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
         }
     }
-    guard let cg = makeTerrainCGImage() else { return terrainFallbackColor }
-    let skTex = SKTexture(cgImage: cg)
-    skTex.filteringMode = .nearest
-    return skTex
+    let rows = gameMap?.rows ?? 200
+    let cols = gameMap?.cols ?? 200
+    guard let cg = makeTerrainCGImage(rows: rows, cols: cols) else { return terrainFallbackColor }
+    return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+}
+
+/// Ispuni kvadratnu sliku ponavljanjem jednog tilea (fallback kad composite prevelike mape padne).
+private func makeTiledGroundImage(tile: CGImage, size: Int) -> CGImage? {
+    let tw = tile.width
+    let th = tile.height
+    guard tw > 0, th > 0, size > 0, size <= 2048 else { return nil }
+    guard let ctx = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: size * 4,
+                              space: CGColorSpaceCreateDeviceRGB(),
+                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+    for y in stride(from: 0, to: size, by: th) {
+        for x in stride(from: 0, to: size, by: tw) {
+            ctx.draw(tile, in: CGRect(x: x, y: y, width: tw, height: th))
+        }
+    }
+    return ctx.makeImage()
 }
 
 /// Orijentacija terena: ravnina u XZ (width = X, height = Z), usklađeno s mrežom za crtanje objekata.
 private let terrainPlaneRotationX: CGFloat = -.pi / 2
 
-/// Boja bočnih strana i donje plohe podignutih kocki (tamnija od vrha).
-private let terrainSideColor = NSColor(white: 0.32, alpha: 1)
+/// Boja bočnih strana i donje plohe podignutih kocki (bijela).
+private let terrainSideColor = NSColor.white
 
-/// Mesh terena: gornja ploča po ćeliji + za podignute ćelije (h>0) donja ploča i 4 bočne strane (puna kocka).
+/// Brzi checksum visina terena – da se mesh ne gradi svaki frame, samo kad se elevacija promijeni (ćelije + vertex visine).
+private func terrainHeightsChecksum(gameMap: GameMap) -> Double {
+    var sum: Double = 0
+    for cell in gameMap.cells.values { sum += Double(cell.height) }
+    for (_, h) in gameMap.vertexHeights { sum += Double(h) }
+    return sum
+}
+
+/// Mesh terena: gornja ploča po ćeliji (4 vrha po ćeliji – vertex visine). Svaka ćelija ima UV 0–1 da dobije jednu tilabilnu ground teksturu.
 private func makeTerrainGeometryWithHeights(gameMap: GameMap) -> SCNGeometry? {
     let rows = gameMap.rows
     let cols = gameMap.cols
@@ -129,32 +161,29 @@ private func makeTerrainGeometryWithHeights(gameMap: GameMap) -> SCNGeometry? {
     let stepW = worldUnitsPerCell
     let stepH = worldUnitsPerCell
     let baseZ: CGFloat = 0
-    func heightAt(row: Int, col: Int) -> CGFloat {
-        gameMap.cell(row: row, col: col)?.height ?? 0
-    }
     var vertices: [SCNVector3] = []
     var uvs: [CGPoint] = []
     var topIndices: [Int32] = []
     for r in 0..<rows {
         for c in 0..<cols {
-            let h = heightAt(row: r, col: c)
+            let h00 = gameMap.vertexHeightAt(vertexRow: r, vertexCol: c)
+            let h01 = gameMap.vertexHeightAt(vertexRow: r, vertexCol: c + 1)
+            let h10 = gameMap.vertexHeightAt(vertexRow: r + 1, vertexCol: c)
+            let h11 = gameMap.vertexHeightAt(vertexRow: r + 1, vertexCol: c + 1)
             let x0 = -halfW + CGFloat(c) * stepW
             let x1 = -halfW + CGFloat(c + 1) * stepW
             let z0 = -halfH + CGFloat(r) * stepH
             let z1 = -halfH + CGFloat(r + 1) * stepH
             let base = Int32(vertices.count)
-            vertices.append(SCNVector3(x0, -z0, h))
-            vertices.append(SCNVector3(x1, -z0, h))
-            vertices.append(SCNVector3(x1, -z1, h))
-            vertices.append(SCNVector3(x0, -z1, h))
-            let u0 = CGFloat(c) / CGFloat(cols)
-            let u1 = CGFloat(c + 1) / CGFloat(cols)
-            let v0 = CGFloat(r) / CGFloat(rows)
-            let v1 = CGFloat(r + 1) / CGFloat(rows)
-            uvs.append(CGPoint(x: u0, y: v0))
-            uvs.append(CGPoint(x: u1, y: v0))
-            uvs.append(CGPoint(x: u1, y: v1))
-            uvs.append(CGPoint(x: u0, y: v1))
+            vertices.append(SCNVector3(x0, -z0, h00))
+            vertices.append(SCNVector3(x1, -z0, h01))
+            vertices.append(SCNVector3(x1, -z1, h11))
+            vertices.append(SCNVector3(x0, -z1, h10))
+            // Svaka ćelija = jedan tile teksture (UV 0–1 po kocki).
+            uvs.append(CGPoint(x: 0, y: 0))
+            uvs.append(CGPoint(x: 1, y: 0))
+            uvs.append(CGPoint(x: 1, y: 1))
+            uvs.append(CGPoint(x: 0, y: 1))
             topIndices.append(contentsOf: [base, base + 1, base + 2, base, base + 2, base + 3])
         }
     }
@@ -179,8 +208,12 @@ private func makeTerrainGeometryWithHeights(gameMap: GameMap) -> SCNGeometry? {
     var sideBottomIndices: [Int32] = []
     for r in 0..<rows {
         for c in 0..<cols {
-            let h = heightAt(row: r, col: c)
-            guard h > 0 else { continue }
+            let h00 = gameMap.vertexHeightAt(vertexRow: r, vertexCol: c)
+            let h01 = gameMap.vertexHeightAt(vertexRow: r, vertexCol: c + 1)
+            let h10 = gameMap.vertexHeightAt(vertexRow: r + 1, vertexCol: c)
+            let h11 = gameMap.vertexHeightAt(vertexRow: r + 1, vertexCol: c + 1)
+            let maxH = max(h00, h01, h10, h11)
+            guard maxH > 0 else { continue }
             let x0 = -halfW + CGFloat(c) * stepW
             let x1 = -halfW + CGFloat(c + 1) * stepW
             let z0 = -halfH + CGFloat(r) * stepH
@@ -188,16 +221,20 @@ private func makeTerrainGeometryWithHeights(gameMap: GameMap) -> SCNGeometry? {
             func addQuad(_ v: [SCNVector3], _ n: SCNVector3, winding: [Int]) {
                 let b = Int32(vertices.count)
                 vertices.append(contentsOf: v)
-                for _ in 0..<4 { normals.append(n); uvs.append(CGPoint(x: 0, y: 0)) }
+                for _ in 0..<4 { normals.append(n) }
+                uvs.append(CGPoint(x: 0, y: 0))
+                uvs.append(CGPoint(x: 1, y: 0))
+                uvs.append(CGPoint(x: 1, y: 1))
+                uvs.append(CGPoint(x: 0, y: 1))
                 sideBottomIndices.append(contentsOf: [b + Int32(winding[0]), b + Int32(winding[1]), b + Int32(winding[2]), b + Int32(winding[0]), b + Int32(winding[2]), b + Int32(winding[3])])
             }
             // Donja ploča (z = baseZ), normala (0,0,-1)
             addQuad([SCNVector3(x0, -z0, baseZ), SCNVector3(x1, -z0, baseZ), SCNVector3(x1, -z1, baseZ), SCNVector3(x0, -z1, baseZ)], SCNVector3(0, 0, -1), winding: [0, 2, 1, 3])
-            // 4 bočne strane
-            addQuad([SCNVector3(x0, -z0, baseZ), SCNVector3(x1, -z0, baseZ), SCNVector3(x1, -z0, h), SCNVector3(x0, -z0, h)], SCNVector3(0, -1, 0), winding: [0, 1, 2, 3])
-            addQuad([SCNVector3(x0, -z1, baseZ), SCNVector3(x1, -z1, baseZ), SCNVector3(x1, -z1, h), SCNVector3(x0, -z1, h)], SCNVector3(0, 1, 0), winding: [0, 2, 1, 3])
-            addQuad([SCNVector3(x0, -z0, baseZ), SCNVector3(x0, -z1, baseZ), SCNVector3(x0, -z1, h), SCNVector3(x0, -z0, h)], SCNVector3(-1, 0, 0), winding: [0, 2, 1, 3])
-            addQuad([SCNVector3(x1, -z0, baseZ), SCNVector3(x1, -z1, baseZ), SCNVector3(x1, -z1, h), SCNVector3(x1, -z0, h)], SCNVector3(1, 0, 0), winding: [0, 1, 2, 3])
+            // 4 bočne strane (gornji rub po vertex visinama)
+            addQuad([SCNVector3(x0, -z0, baseZ), SCNVector3(x1, -z0, baseZ), SCNVector3(x1, -z0, h01), SCNVector3(x0, -z0, h00)], SCNVector3(0, -1, 0), winding: [0, 1, 2, 3])
+            addQuad([SCNVector3(x0, -z1, baseZ), SCNVector3(x1, -z1, baseZ), SCNVector3(x1, -z1, h11), SCNVector3(x0, -z1, h10)], SCNVector3(0, 1, 0), winding: [0, 2, 1, 3])
+            addQuad([SCNVector3(x0, -z0, baseZ), SCNVector3(x0, -z1, baseZ), SCNVector3(x0, -z1, h10), SCNVector3(x0, -z0, h00)], SCNVector3(-1, 0, 0), winding: [0, 2, 1, 3])
+            addQuad([SCNVector3(x1, -z0, baseZ), SCNVector3(x1, -z1, baseZ), SCNVector3(x1, -z1, h11), SCNVector3(x1, -z0, h01)], SCNVector3(1, 0, 0), winding: [0, 1, 2, 3])
         }
     }
     let normalsN = normals.map { n -> SCNVector3 in
@@ -230,38 +267,156 @@ private func terrainTextureFlipVTransform() -> SCNMatrix4 {
     return SCNMatrix4Mult(t, s)
 }
 
-/// Proceduralni teren (ravnina + tekstura) – koristi se kad nema učitane .scn mape ili kad .scn nema node "terrain".
-/// width/height u world jedinicama: cols×40, rows×40 (1 ćelija = 40×40).
+/// Broj ponavljanja normal/roughness na terenu (tilable detalj, 3D osjećaj kao Wall).
+private let terrainPBRTiling: CGFloat = 10
+
+/// Postavi PBR na materijal gornje plohe terena: diffuse + normal + roughness, kao Wall.
+private func applyTerrainPBR(to mat: SCNMaterial, diffuseContents: Any?) {
+    mat.diffuse.contents = diffuseContents
+    mat.diffuse.contentsTransform = terrainTextureFlipVTransform()
+    mat.diffuse.wrapS = .clamp
+    mat.diffuse.wrapT = .clamp
+    mat.ambient.contents = NSColor.white
+    mat.specular.contents = NSColor.darkGray
+    mat.isDoubleSided = true
+    mat.lightingModel = .physicallyBased
+    if let normalCG = TerrainTextureLoader.shared.groundNormalImage(bundle: .main) {
+        let normalImg = NSImage(cgImage: normalCG, size: NSSize(width: normalCG.width, height: normalCG.height))
+        mat.normal.contents = normalImg
+        mat.normal.intensity = 1.0
+        mat.normal.wrapS = .repeat
+        mat.normal.wrapT = .repeat
+        mat.normal.contentsTransform = SCNMatrix4MakeScale(terrainPBRTiling, -terrainPBRTiling, 1)
+        var tr = SCNMatrix4MakeTranslation(0, 1, 0)
+        mat.normal.contentsTransform = SCNMatrix4Mult(tr, mat.normal.contentsTransform)
+    }
+    if let roughCG = TerrainTextureLoader.shared.groundRoughnessImage(bundle: .main) {
+        let roughImg = NSImage(cgImage: roughCG, size: NSSize(width: roughCG.width, height: roughCG.height))
+        mat.roughness.contents = roughImg
+        mat.roughness.wrapS = .repeat
+        mat.roughness.wrapT = .repeat
+        mat.roughness.contentsTransform = SCNMatrix4MakeScale(terrainPBRTiling, -terrainPBRTiling, 1)
+        var tr = SCNMatrix4MakeTranslation(0, 1, 0)
+        mat.roughness.contentsTransform = SCNMatrix4Mult(tr, mat.roughness.contentsTransform)
+    }
+}
+
+/// Jedna ground tekstura po ćeliji: diffuse = tilabilna slika, wrap repeat, UV 0–1 po kocki.
+private func applyTerrainPBRTiled(to mat: SCNMaterial) {
+    let groundTile = TerrainTextureLoader.shared.tileImage(for: .grass, bundle: .main)
+    let diffuseContents: Any? = groundTile.flatMap { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
+    mat.diffuse.contents = diffuseContents ?? terrainFallbackColor
+    mat.diffuse.contentsTransform = terrainTextureFlipVTransform()
+    mat.diffuse.wrapS = .repeat
+    mat.diffuse.wrapT = .repeat
+    mat.ambient.contents = NSColor.white
+    mat.specular.contents = NSColor.darkGray
+    mat.isDoubleSided = true
+    mat.lightingModel = .physicallyBased
+    if let normalCG = TerrainTextureLoader.shared.groundNormalImage(bundle: .main) {
+        let normalImg = NSImage(cgImage: normalCG, size: NSSize(width: normalCG.width, height: normalCG.height))
+        mat.normal.contents = normalImg
+        mat.normal.intensity = 1.0
+        mat.normal.wrapS = .repeat
+        mat.normal.wrapT = .repeat
+        mat.normal.contentsTransform = SCNMatrix4MakeScale(terrainPBRTiling, -terrainPBRTiling, 1)
+        var tr = SCNMatrix4MakeTranslation(0, 1, 0)
+        mat.normal.contentsTransform = SCNMatrix4Mult(tr, mat.normal.contentsTransform)
+    }
+    if let roughCG = TerrainTextureLoader.shared.groundRoughnessImage(bundle: .main) {
+        let roughImg = NSImage(cgImage: roughCG, size: NSSize(width: roughCG.width, height: roughCG.height))
+        mat.roughness.contents = roughImg
+        mat.roughness.wrapS = .repeat
+        mat.roughness.wrapT = .repeat
+        mat.roughness.contentsTransform = SCNMatrix4MakeScale(terrainPBRTiling, -terrainPBRTiling, 1)
+        var tr = SCNMatrix4MakeTranslation(0, 1, 0)
+        mat.roughness.contentsTransform = SCNMatrix4Mult(tr, mat.roughness.contentsTransform)
+    }
+}
+
+/// Ravnina terena kao mreža kvadova: jedan quad po ćeliji, UV 0–1 po ćeliji da svaka kocka ima svoju ground teksturu.
+private func makeProceduralTerrainGrid(rows: Int, cols: Int) -> SCNGeometry? {
+    guard rows > 0, cols > 0 else { return nil }
+    let halfW = effectiveMapWorldW(cols: cols) / 2
+    let halfH = effectiveMapWorldH(rows: rows) / 2
+    let stepW = worldUnitsPerCell
+    let stepH = worldUnitsPerCell
+    var vertices: [SCNVector3] = []
+    var uvs: [CGPoint] = []
+    var indices: [Int32] = []
+    for r in 0..<rows {
+        for c in 0..<cols {
+            let x0 = -halfW + CGFloat(c) * stepW
+            let x1 = -halfW + CGFloat(c + 1) * stepW
+            let z0 = -halfH + CGFloat(r) * stepH
+            let z1 = -halfH + CGFloat(r + 1) * stepH
+            let base = Int32(vertices.count)
+            vertices.append(SCNVector3(x0, -z0, 0))
+            vertices.append(SCNVector3(x1, -z0, 0))
+            vertices.append(SCNVector3(x1, -z1, 0))
+            vertices.append(SCNVector3(x0, -z1, 0))
+            uvs.append(CGPoint(x: 0, y: 0))
+            uvs.append(CGPoint(x: 1, y: 0))
+            uvs.append(CGPoint(x: 1, y: 1))
+            uvs.append(CGPoint(x: 0, y: 1))
+            indices.append(contentsOf: [base, base + 1, base + 2, base, base + 2, base + 3])
+        }
+    }
+    let normals = vertices.map { _ in SCNVector3(0, 0, 1) }
+    let vertexSource = SCNGeometrySource(vertices: vertices)
+    let normalSource = SCNGeometrySource(normals: normals)
+    let uvData = uvs.map { [Float($0.x), Float($0.y)] }.flatMap { $0 }
+    let uvSource = SCNGeometrySource(
+        data: Data(bytes: uvData, count: uvData.count * MemoryLayout<Float>.size),
+        semantic: .texcoord,
+        vectorCount: uvs.count,
+        usesFloatComponents: true,
+        componentsPerVector: 2,
+        bytesPerComponent: MemoryLayout<Float>.size,
+        dataOffset: 0,
+        dataStride: MemoryLayout<Float>.size * 2
+    )
+    let element = SCNGeometryElement(indices: indices, primitiveType: .triangles)
+    return SCNGeometry(sources: [vertexSource, normalSource, uvSource], elements: [element])
+}
+
+/// Proceduralni teren: mreža kvadova (jedan po ćeliji), svaka ćelija s ground teksturom (UV 0–1).
+/// width/height u world jedinicama: cols×40, rows×40.
 private func makeProceduralTerrainNode(width: CGFloat, height: CGFloat, terrainTexture: Any? = nil) -> SCNNode {
-    let plane = SCNPlane(width: width, height: height)
+    let cols = max(1, Int(round(width / worldUnitsPerCell)))
+    let rows = max(1, Int(round(height / worldUnitsPerCell)))
     let terrainMat = SCNMaterial()
-    let tex = terrainTexture ?? makeTerrainTexture()
-    terrainMat.diffuse.contents = tex ?? terrainFallbackColor
-    terrainMat.diffuse.contentsTransform = terrainTextureFlipVTransform()
-    terrainMat.ambient.contents = NSColor.black
-    terrainMat.specular.contents = NSColor.black
-    terrainMat.isDoubleSided = true
-    terrainMat.lightingModel = .constant
+    applyTerrainPBRTiled(to: terrainMat)
+    if let gridGeo = makeProceduralTerrainGrid(rows: rows, cols: cols) {
+        gridGeo.materials = [terrainMat]
+        let planeNode = SCNNode(geometry: gridGeo)
+        planeNode.eulerAngles.x = terrainPlaneRotationX
+        planeNode.position = SCNVector3(0, 0, 0)
+        planeNode.name = "terrain"
+        planeNode.categoryBitMask = 1
+        planeNode.renderingOrder = -100
+        return planeNode
+    }
+    let plane = SCNPlane(width: width, height: height)
     plane.materials = [terrainMat]
     let planeNode = SCNNode(geometry: plane)
     planeNode.eulerAngles.x = terrainPlaneRotationX
     planeNode.position = SCNVector3(0, 0, 0)
     planeNode.name = "terrain"
     planeNode.categoryBitMask = 1
+    planeNode.renderingOrder = -100
     return planeNode
 }
 
-/// Učitani teren iz .scn: ispravi orijentaciju na XZ i postavi pozadinu na bijelo (bez kavastih/zemljanih boja).
+/// Učitani teren iz .scn: orijentacija XZ, PBR tiled (jedna ground tekstura po ćeliji), redoslijed crtanja.
 private func fixLoadedTerrainOrientationAndMaterial(_ root: SCNNode) {
     guard let terrain = findTerrainInHierarchy(root) else { return }
     terrain.eulerAngles.x = terrainPlaneRotationX
     terrain.eulerAngles.y = 0
     terrain.eulerAngles.z = 0
+    terrain.renderingOrder = -100
     guard let geo = terrain.geometry, let mat = geo.materials.first else { return }
-    mat.ambient.contents = NSColor.black
-    mat.specular.contents = NSColor.black
-    mat.diffuse.contents = makeTerrainTexture() ?? terrainFallbackColor
-    mat.diffuse.contentsTransform = terrainTextureFlipVTransform()
+    applyTerrainPBRTiled(to: mat)
 }
 
 private func findTerrainInHierarchy(_ node: SCNNode) -> SCNNode? {
@@ -361,6 +516,8 @@ private final class SceneKitMapNSView: NSView {
     var cameraPanAllowed: Bool = true
     /// World koordinata → (row, col) za hit na terenu (poziv iz hit testa).
     var onCellHit: ((SCNVector3) -> (row: Int, col: Int)?)?
+    /// Klik na kuglu (točku sjecišta) – (vertexRow, vertexCol). Jedna kugla = jedan vrh.
+    var onVertexDotSelected: ((Int, Int) -> Void)?
     /// Poziva se pri pomicanju miša – za ghost objekta (npr. zid) na kursoru.
     var onMouseMove: ((NSPoint) -> Void)?
     /// Ažuriraj ghost iz trenutne pozicije miša (poziva se iz renderera kad mouseMoved ne stiže).
@@ -378,6 +535,8 @@ private final class SceneKitMapNSView: NSView {
     private var trackingArea: NSTrackingArea?
     /// Lijevi klik: hit test na mouseDown, poziv onClick tek na mouseUp ako nije bilo pomicanja (da se ne pomiješa s panom).
     private var pendingClickCell: (row: Int, col: Int)?
+    /// Klik na kuglu – vertex (row, col) sjecišta; na mouseUp poziva se onVertexDotSelected.
+    private var pendingVertexDot: (row: Int, col: Int)?
     private var wallLineStartCell: (row: Int, col: Int)?
     private var wallLineCells: [(Int, Int)] = []
     var isWallLineActive: Bool { wallLineStartCell != nil }
@@ -580,6 +739,23 @@ private final class SceneKitMapNSView: NSView {
         return cell
     }
 
+    /// Hit na kuglu (točku sjecišta). Vraća (vertexRow, vertexCol) ako je prvi pogodak čvor s imenom "dot_*".
+    private func vertexDotHit(at pointInContainer: NSPoint) -> (row: Int, col: Int)? {
+        guard let sv = scnView else { return nil }
+        let hitPointInView = convert(pointInContainer, to: sv)
+        guard sv.bounds.contains(hitPointInView) else { return nil }
+        let hitOptions: [SCNHitTestOption: Any] = [
+            .searchMode: SCNHitTestSearchMode.all.rawValue,
+            .categoryBitMask: 1
+        ]
+        let hits = sv.hitTest(hitPointInView, options: hitOptions)
+        guard let hit = hits.first(where: { $0.node.name?.hasPrefix("dot_") == true }),
+              let name = hit.node.name else { return nil }
+        let parts = name.dropFirst(4).split(separator: "_")
+        guard parts.count == 2, let r = Int(parts[0]), let c = Int(parts[1]) else { return nil }
+        return (r, c)
+    }
+
     private func buildStraightLineCells(from start: (row: Int, col: Int), to end: (row: Int, col: Int)) -> [(Int, Int)] {
         let dRow = end.row - start.row
         let dCol = end.col - start.col
@@ -626,6 +802,7 @@ private final class SceneKitMapNSView: NSView {
         lastPanLocation = convert(event.locationInWindow, from: nil)
         mouseDownLocation = lastPanLocation
         pendingClickCell = nil
+        pendingVertexDot = nil
         let mouseDownLog = "[Camera] mouseDown loc=(\(String(format: "%.0f", lastPanLocation.x)),\(String(format: "%.0f", lastPanLocation.y))) handPanMode=\(handPanMode)"
         print(mouseDownLog)
         Task { @MainActor in PlacementDebugConsole.shared.append(mouseDownLog) }
@@ -637,6 +814,10 @@ private final class SceneKitMapNSView: NSView {
             return
         }
         if isPanning { return }
+        if let vertex = vertexDotHit(at: lastPanLocation) {
+            pendingVertexDot = vertex
+            return
+        }
         guard let (row, col) = terrainCell(at: lastPanLocation) else {
             onPlacementError?("Klik nije pogodio teren.")
             return
@@ -652,6 +833,7 @@ private final class SceneKitMapNSView: NSView {
 
     override func rightMouseDown(with event: NSEvent) {
         pendingClickCell = nil
+        pendingVertexDot = nil
         clearWallLineDraft()
         onRightClick?()
     }
@@ -675,7 +857,7 @@ private final class SceneKitMapNSView: NSView {
         }
         if !isPanning {
             let dist = hypot(loc.x - mouseDownLocation.x, loc.y - mouseDownLocation.y)
-            if dist > Self.clickDragThreshold { pendingClickCell = nil }
+            if dist > Self.clickDragThreshold { pendingClickCell = nil; pendingVertexDot = nil }
             if cameraPanAllowed && (handPanMode || dist > Self.clickDragThreshold) {
                 isPanning = true
                 onPanStart?(mouseDownLocation)
@@ -710,10 +892,15 @@ private final class SceneKitMapNSView: NSView {
             }
             return
         }
-        if event.buttonNumber == 0, !isPanning, let cell = pendingClickCell {
-            onClick?(cell.row, cell.col)
+        if event.buttonNumber == 0, !isPanning {
+            if let vertex = pendingVertexDot {
+                onVertexDotSelected?(vertex.row, vertex.col)
+            } else if let cell = pendingClickCell {
+                onClick?(cell.row, cell.col)
+            }
         }
         pendingClickCell = nil
+        pendingVertexDot = nil
         if isPanning {
             isPanning = false
             NSCursor.closedHand.pop()
@@ -753,19 +940,17 @@ private func gridLineColor(isLargeGrid: Bool) -> NSColor {
     NSColor.white.withAlphaComponent(0.95)
 }
 
-/// Ponovno gradi linije rešetke i točke. Mreža je uvijek ravna na fiksnoj visini – ne prati teren.
-private func refreshGrid(gridNode: SCNNode, zoom: CGFloat, gridDivisions: Int, mapWidth: CGFloat, mapHeight: CGFloat, gameMap: GameMap? = nil, rows: Int? = nil, cols: Int? = nil, lineColor: NSColor? = nil, showDots: Bool = false) {
+/// Ponovno gradi linije rešetke. Mreža je uvijek ravna na fiksnoj visini – ne prati teren. Točke (vertex) će se drugi put implementirati iz Map Editora.
+private func refreshGrid(gridNode: SCNNode, zoom: CGFloat, gridDivisions: Int, mapWidth: CGFloat, mapHeight: CGFloat, gameMap: GameMap? = nil, rows: Int? = nil, cols: Int? = nil, lineColor: NSColor? = nil) {
     gridNode.childNodes.forEach { $0.removeFromParentNode() }
     let divisionsForBuilding = Int(mapWidth / worldUnitsPerCell)
     let isLarge = (gridDivisions == divisionsForBuilding)
     let lineColor = lineColor ?? gridLineColor(isLargeGrid: isLarge)
     let baseW: CGFloat = 2.5
     let baseH: CGFloat = 8
-    let baseDotRadius: CGFloat = 9
     let z = max(0.1, min(50, zoom))
     let lineW = baseW / z
     let lineH = baseH / z
-    let dotRadius = baseDotRadius / z
     let halfW = mapWidth / 2
     let halfH = mapHeight / 2
     let stepW = mapWidth / CGFloat(gridDivisions)
@@ -793,23 +978,6 @@ private func refreshGrid(gridNode: SCNNode, zoom: CGFloat, gridDivisions: Int, m
         gridNode.addChildNode(n)
         zCoord += stepH
     }
-    if showDots {
-        var xDot = -halfW
-        while xDot <= halfW {
-            var zDot = -halfH
-            while zDot <= halfH {
-                let sphere = SCNSphere(radius: dotRadius)
-                sphere.firstMaterial?.diffuse.contents = lineColor
-                sphere.firstMaterial?.isDoubleSided = true
-                sphere.firstMaterial?.lightingModel = .constant
-                let dot = SCNNode(geometry: sphere)
-                dot.position = SCNVector3(xDot, gridY + dotRadius, zDot)
-                gridNode.addChildNode(dot)
-                zDot += stepH
-            }
-            xDot += stepW
-        }
-    }
 }
 
 /// Iz world pozicije na terenu vraća (row, col) ili nil. 1 ćelija = 40 world jedinica.
@@ -822,27 +990,7 @@ private func cellFromMapLocalPosition(_ localPos: SCNVector3, rows: Int, cols: I
     return (row, col)
 }
 
-/// Visina vrha na kutu (r,c): prosjek visina ćelija koje dijele taj kut (kao u makeTerrainGeometryWithHeights).
-private func vertexHeightAtCorner(r: Int, c: Int, gameMap: GameMap) -> CGFloat {
-    func heightAt(row: Int, col: Int) -> CGFloat {
-        gameMap.cell(row: row, col: col)?.height ?? 0
-    }
-    var sum: CGFloat = 0
-    var n = 0
-    for dr in 0...1 {
-        for dc in 0...1 {
-            let rr = r - 1 + dr
-            let cc = c - 1 + dc
-            if rr >= 0, rr < gameMap.rows, cc >= 0, cc < gameMap.cols {
-                sum += heightAt(row: rr, col: cc)
-                n += 1
-            }
-        }
-    }
-    return n > 0 ? sum / CGFloat(n) : 0
-}
-
-/// Visina terena u world (x, z); bilinearna interpolacija iz vertexHeightAtCorner. Koristi se da mreža prati deformaciju terena.
+/// Visina terena u world (x, z); bilinearna interpolacija iz vertex visina (GameMap.vertexHeightAt). Koristi se da mreža prati deformaciju terena.
 private func terrainHeightAtWorld(x: CGFloat, z: CGFloat, gameMap: GameMap, rows: Int, cols: Int) -> CGFloat {
     let halfW = effectiveMapWorldW(cols: cols) / 2
     let halfH = effectiveMapWorldH(rows: rows) / 2
@@ -853,10 +1001,10 @@ private func terrainHeightAtWorld(x: CGFloat, z: CGFloat, gameMap: GameMap, rows
     let r0 = max(0, min(rows - 1, Int(floor(r_f))))
     let c1 = min(cols, c0 + 1)
     let r1 = min(rows, r0 + 1)
-    let h00 = vertexHeightAtCorner(r: r0, c: c0, gameMap: gameMap)
-    let h01 = c1 > c0 ? vertexHeightAtCorner(r: r0, c: c1, gameMap: gameMap) : h00
-    let h10 = r1 > r0 ? vertexHeightAtCorner(r: r1, c: c0, gameMap: gameMap) : h00
-    let h11 = (c1 > c0 && r1 > r0) ? vertexHeightAtCorner(r: r1, c: c1, gameMap: gameMap) : h00
+    let h00 = gameMap.vertexHeightAt(vertexRow: r0, vertexCol: c0)
+    let h01 = c1 > c0 ? gameMap.vertexHeightAt(vertexRow: r0, vertexCol: c1) : h00
+    let h10 = r1 > r0 ? gameMap.vertexHeightAt(vertexRow: r1, vertexCol: c0) : h00
+    let h11 = (c1 > c0 && r1 > r0) ? gameMap.vertexHeightAt(vertexRow: r1, vertexCol: c1) : h00
     let tx = c_f - CGFloat(c0)
     let tz = r_f - CGFloat(r0)
     return (1 - tx) * (1 - tz) * h00 + tx * (1 - tz) * h01 + (1 - tx) * tz * h10 + tx * tz * h11
@@ -969,7 +1117,6 @@ struct SceneKitMapView: NSViewRepresentable {
     /// Map Editor: prikaži mrežu 40×40 (može zajedno s 10×10).
     var gridShow40: Bool = false
     /// Map Editor: prikaži kugle na sjecištima (gumb Kugle).
-    var showGridDots: Bool = false
     @Binding var handPanMode: Bool
     var showPivotIndicator: Bool = false
     var isEraseMode: Bool = false
@@ -985,6 +1132,10 @@ struct SceneKitMapView: NSViewRepresentable {
     var onCellSelectionToggle: ((Int, Int) -> Void)? = nil
     /// Map Editor – mod „Odabir ćelija”: klik označuje/uklanja jednu ćeliju (precizno).
     var isCellSelectionMode: Bool = false
+    /// Map Editor – klik na kuglu (točku sjecišta) označi taj vrh za gore/dolje (samo ta točka).
+    var onVertexDotSelected: ((Int, Int) -> Void)? = nil
+    /// Map Editor – dvoprstni/desni klik izlazi iz alata Teren (elevator).
+    var onExitTerrainEditMode: (() -> Void)? = nil
     var isPlaceMode: Bool { gameState.selectedPlacementObjectId != nil }
 
     /// U Map Editoru: jedna ili obje mreže (10×10, 40×40); kad obje isključene, nema mreže.
@@ -1115,13 +1266,15 @@ struct SceneKitMapView: NSViewRepresentable {
         }
     }
 
-    private func setupGridNode(zoom: CGFloat, gridDivisions: Int, mapWidth: CGFloat, mapHeight: CGFloat, gameMap: GameMap? = nil, rows: Int? = nil, cols: Int? = nil, showDots: Bool) -> SCNNode {
+    private func setupGridNode(zoom: CGFloat, gridDivisions: Int, mapWidth: CGFloat, mapHeight: CGFloat, gameMap: GameMap? = nil, rows: Int? = nil, cols: Int? = nil) -> SCNNode {
         let gridNode = SCNNode()
         gridNode.name = "grid"
         gridNode.categoryBitMask = 1
         gridNode.position = SCNVector3Zero
         gridNode.eulerAngles = SCNVector3Zero
-        refreshGrid(gridNode: gridNode, zoom: zoom, gridDivisions: gridDivisions, mapWidth: mapWidth, mapHeight: mapHeight, gameMap: gameMap, rows: rows, cols: cols, showDots: showDots)
+        /// Mreža se crta iznad terena da ne prekrije teksturu u Map Builderu.
+        gridNode.renderingOrder = 100
+        refreshGrid(gridNode: gridNode, zoom: zoom, gridDivisions: gridDivisions, mapWidth: mapWidth, mapHeight: mapHeight, gameMap: gameMap, rows: rows, cols: cols)
         return gridNode
     }
 
@@ -1212,7 +1365,7 @@ struct SceneKitMapView: NSViewRepresentable {
         scene.rootNode.eulerAngles = SCNVector3Zero
 
         let loader = GameAssetLoader.shared
-        let terrainTextureOnMainThread = makeTerrainTexture(gameMap: gameState.gameMap, useWhiteBackground: gameState.isMapEditorMode)
+        let terrainTextureOnMainThread = makeTerrainTexture(gameMap: gameState.gameMap, useWhiteBackground: false)
         setupSceneAndTerrain(into: scene, loader: loader, terrainTexture: terrainTextureOnMainThread)
 
         let coord = context.coordinator
@@ -1221,20 +1374,20 @@ struct SceneKitMapView: NSViewRepresentable {
         let div10 = gridDivisionsDisplay(rows: rows, cols: cols)
         if isMapEditorGridMode {
             if gridShow10 {
-                let n10 = setupGridNode(zoom: zoom, gridDivisions: div10, mapWidth: mapWidth, mapHeight: mapHeight, gameMap: gameState.gameMap, rows: rows, cols: cols, showDots: showGridDots)
+                let n10 = setupGridNode(zoom: zoom, gridDivisions: div10, mapWidth: mapWidth, mapHeight: mapHeight, gameMap: gameState.gameMap, rows: rows, cols: cols)
                 n10.name = "grid10"
                 scene.rootNode.addChildNode(n10)
                 coord.gridNode10 = n10
             } else { coord.gridNode10 = nil }
             if gridShow40 {
-                let n40 = setupGridNode(zoom: zoom, gridDivisions: div40, mapWidth: mapWidth, mapHeight: mapHeight, gameMap: gameState.gameMap, rows: rows, cols: cols, showDots: showGridDots)
+                let n40 = setupGridNode(zoom: zoom, gridDivisions: div40, mapWidth: mapWidth, mapHeight: mapHeight, gameMap: gameState.gameMap, rows: rows, cols: cols)
                 n40.name = "grid40"
                 scene.rootNode.addChildNode(n40)
                 coord.gridNode40 = n40
             } else { coord.gridNode40 = nil }
             coord.gridNode = nil
         } else {
-            let gridNode = setupGridNode(zoom: zoom, gridDivisions: div40, mapWidth: mapWidth, mapHeight: mapHeight, gameMap: gameState.gameMap, rows: rows, cols: cols, showDots: showGridDots)
+            let gridNode = setupGridNode(zoom: zoom, gridDivisions: div40, mapWidth: mapWidth, mapHeight: mapHeight, gameMap: gameState.gameMap, rows: rows, cols: cols)
             scene.rootNode.addChildNode(gridNode)
             coord.gridNode = gridNode
             coord.gridNode10 = nil
@@ -1282,7 +1435,6 @@ struct SceneKitMapView: NSViewRepresentable {
         coord.cellSelectionOverlayNode = cellSelectionOverlay
 
         coord.lastGridZoom = CGFloat(gameState.mapCameraSettings.currentZoom)
-        coord.lastShowGridDots = showGridDots
 
         container.onCellHit = { [rows, cols] worldPos in
             cellFromMapLocalPosition(worldPos, rows: rows, cols: cols)
@@ -1483,8 +1635,12 @@ struct SceneKitMapView: NSViewRepresentable {
                 }
             }
         }
-        container.onRightClick = { [gameState] in
-            DispatchQueue.main.async { gameState.selectedPlacementObjectId = nil }
+        container.onRightClick = { [gameState, isTerrainEditMode, onExitTerrainEditMode] in
+            if isTerrainEditMode, let exit = onExitTerrainEditMode {
+                DispatchQueue.main.async { exit() }
+            } else {
+                DispatchQueue.main.async { gameState.selectedPlacementObjectId = nil }
+            }
         }
         container.onPlacementError = { [gameState] msg in
             DispatchQueue.main.async { gameState.placementError = msg }
@@ -1493,6 +1649,9 @@ struct SceneKitMapView: NSViewRepresentable {
         coord.onTerrainEdit = onTerrainEdit
         coord.onTerrainAddBrushSelection = onTerrainAddBrushSelection
         coord.onCellSelectionToggle = onCellSelectionToggle
+        container.onVertexDotSelected = { [onVertexDotSelected] vr, vc in
+            DispatchQueue.main.async { onVertexDotSelected?(vr, vc) }
+        }
         container.handPanMode = handPanMode
         container.isEraseMode = isEraseMode
         container.isCellSelectionMode = isCellSelectionMode
@@ -1520,6 +1679,9 @@ struct SceneKitMapView: NSViewRepresentable {
         coord.onTerrainEdit = onTerrainEdit
         coord.onTerrainAddBrushSelection = onTerrainAddBrushSelection
         coord.onCellSelectionToggle = onCellSelectionToggle
+        container.onVertexDotSelected = { [onVertexDotSelected] vr, vc in
+            DispatchQueue.main.async { onVertexDotSelected?(vr, vc) }
+        }
         if isTerrainEditMode && !wasTerrain {
             Task { @MainActor in MapEditorConsole.shared.append("Teren: selector uključen (zelena kockica prati miš)") }
         }
@@ -1539,6 +1701,13 @@ struct SceneKitMapView: NSViewRepresentable {
         container.cameraPanAllowed = !isPlaceMode && !isTerrainEditMode && !isEraseMode && !isCellSelectionMode
         container.currentSelectedPlacementObjectId = gameState.selectedPlacementObjectId
         container.selectedToolsPanelItem = gameState.selectedToolsPanelItem
+        container.onRightClick = { [gameState, isTerrainEditMode, onExitTerrainEditMode] in
+            if isTerrainEditMode, let exit = onExitTerrainEditMode {
+                DispatchQueue.main.async { exit() }
+            } else {
+                DispatchQueue.main.async { gameState.selectedPlacementObjectId = nil }
+            }
+        }
         container.onPanStart = { [gameState] mouseLoc in
             let s = gameState.mapCameraSettings
             let msg = "[Camera] pan start miš(view)=(\(String(format: "%.1f", mouseLoc.x)),\(String(format: "%.1f", mouseLoc.y))) kamera panOffset=(\(String(format: "%.1f", s.panOffset.x)),\(String(format: "%.1f", s.panOffset.y))) mapRotation=\(String(format: "%.2f", s.mapRotation)) zoom=\(String(format: "%.1f", s.currentZoom))"
@@ -1586,24 +1755,22 @@ struct SceneKitMapView: NSViewRepresentable {
         coord.mapRows = rows
         coord.mapCols = cols
         let zoom = gameState.mapCameraSettings.currentZoom
-        let dotsChanged = coord.lastShowGridDots != showGridDots
-        if dotsChanged { coord.lastShowGridDots = showGridDots }
         let div40 = gridDivisionsBuilding(rows: rows, cols: cols)
         let div10 = gridDivisionsDisplay(rows: rows, cols: cols)
         let mapRows = coord.mapRows
         let mapCols = coord.mapCols
         let gridGameMap = gameState.gameMap
-        let shouldRefreshGrid = abs(CGFloat(zoom) - coord.lastGridZoom) > 0.01 || dotsChanged
+        let shouldRefreshGrid = abs(CGFloat(zoom) - coord.lastGridZoom) > 0.01
         if let grid = coord.gridNode {
             grid.isHidden = !showGrid
             if shouldRefreshGrid {
-                if dotsChanged || abs(CGFloat(zoom) - coord.lastGridZoom) > 0.01 { coord.lastGridZoom = CGFloat(zoom) }
-                refreshGrid(gridNode: grid, zoom: zoom, gridDivisions: div40, mapWidth: mapWidth, mapHeight: mapHeight, gameMap: gridGameMap, rows: mapRows, cols: mapCols, showDots: showGridDots)
+                coord.lastGridZoom = CGFloat(zoom)
+                refreshGrid(gridNode: grid, zoom: zoom, gridDivisions: div40, mapWidth: mapWidth, mapHeight: mapHeight, gameMap: gridGameMap, rows: mapRows, cols: mapCols)
             }
         }
         if isMapEditorGridMode, let scene = coord.scene {
             if gridShow10, coord.gridNode10 == nil {
-                let n10 = setupGridNode(zoom: zoom, gridDivisions: div10, mapWidth: mapWidth, mapHeight: mapHeight, gameMap: gridGameMap, rows: mapRows, cols: mapCols, showDots: showGridDots)
+                let n10 = setupGridNode(zoom: zoom, gridDivisions: div10, mapWidth: mapWidth, mapHeight: mapHeight, gameMap: gridGameMap, rows: mapRows, cols: mapCols)
                 n10.name = "grid10"
                 scene.rootNode.addChildNode(n10)
                 coord.gridNode10 = n10
@@ -1612,7 +1779,7 @@ struct SceneKitMapView: NSViewRepresentable {
                 coord.gridNode10 = nil
             }
             if gridShow40, coord.gridNode40 == nil {
-                let n40 = setupGridNode(zoom: zoom, gridDivisions: div40, mapWidth: mapWidth, mapHeight: mapHeight, gameMap: gridGameMap, rows: mapRows, cols: mapCols, showDots: showGridDots)
+                let n40 = setupGridNode(zoom: zoom, gridDivisions: div40, mapWidth: mapWidth, mapHeight: mapHeight, gameMap: gridGameMap, rows: mapRows, cols: mapCols)
                 n40.name = "grid40"
                 scene.rootNode.addChildNode(n40)
                 coord.gridNode40 = n40
@@ -1624,43 +1791,45 @@ struct SceneKitMapView: NSViewRepresentable {
         if let g10 = coord.gridNode10 {
             g10.isHidden = !showGrid || !gridShow10
             if shouldRefreshGrid {
-                refreshGrid(gridNode: g10, zoom: zoom, gridDivisions: div10, mapWidth: mapWidth, mapHeight: mapHeight, gameMap: gridGameMap, rows: mapRows, cols: mapCols, showDots: showGridDots)
+                refreshGrid(gridNode: g10, zoom: zoom, gridDivisions: div10, mapWidth: mapWidth, mapHeight: mapHeight, gameMap: gridGameMap, rows: mapRows, cols: mapCols)
             }
         }
         if let g40 = coord.gridNode40 {
             g40.isHidden = !showGrid || !gridShow40
             if shouldRefreshGrid {
-                refreshGrid(gridNode: g40, zoom: zoom, gridDivisions: div40, mapWidth: mapWidth, mapHeight: mapHeight, gameMap: gridGameMap, rows: mapRows, cols: mapCols, showDots: showGridDots)
+                refreshGrid(gridNode: g40, zoom: zoom, gridDivisions: div40, mapWidth: mapWidth, mapHeight: mapHeight, gameMap: gridGameMap, rows: mapRows, cols: mapCols)
             }
         }
-        if coord.gridNode10 != nil || coord.gridNode40 != nil, (abs(CGFloat(zoom) - coord.lastGridZoom) > 0.01 || dotsChanged) {
+        if coord.gridNode10 != nil || coord.gridNode40 != nil, abs(CGFloat(zoom) - coord.lastGridZoom) > 0.01 {
             coord.lastGridZoom = CGFloat(zoom)
         }
         if let sid = selectedId, !WallParent.isWall(objectId: sid) {
             coord.wallLinePreviewNode?.childNodes.forEach { $0.removeFromParentNode() }
         }
 
-        // Map Editor – elevacija terena: zamijeni ravninu meshom iz visina ćelija (10×10).
-        if isTerrainEditMode, let scene = coord.scene, let terrain = findTerrainInHierarchy(scene.rootNode),
+        // Map Editor – elevacija terena: mesh i tekstura samo kad se visine promijene (ne svaki frame).
+        let terrainChecksum = isTerrainEditMode ? terrainHeightsChecksum(gameMap: gameState.gameMap) : 0
+        let terrainNeedsRebuild = isTerrainEditMode && (terrainChecksum != coord.lastTerrainHeightsChecksum || !wasTerrain)
+        if terrainNeedsRebuild {
+            coord.lastTerrainHeightsChecksum = terrainChecksum
+        }
+        if terrainNeedsRebuild, let scene = coord.scene, let terrain = findTerrainInHierarchy(scene.rootNode),
            let newGeo = makeTerrainGeometryWithHeights(gameMap: gameState.gameMap) {
-            let oldMat = terrain.geometry?.materials.first ?? {
-                let m = SCNMaterial()
-                m.diffuse.contents = makeTerrainTexture(gameMap: gameState.gameMap, useWhiteBackground: gameState.isMapEditorMode) ?? terrainFallbackColor
-                m.ambient.contents = NSColor.black
-                m.specular.contents = NSColor.black
-                m.isDoubleSided = true
-                m.lightingModel = .constant
-                return m
-            }()
-            oldMat.diffuse.contents = makeTerrainTexture(gameMap: gameState.gameMap, useWhiteBackground: gameState.isMapEditorMode) ?? terrainFallbackColor
-            oldMat.diffuse.contentsTransform = SCNMatrix4Identity
-            let sideMat = SCNMaterial()
-            sideMat.diffuse.contents = terrainSideColor
-            sideMat.ambient.contents = NSColor.black
-            sideMat.specular.contents = NSColor.black
-            sideMat.isDoubleSided = true
-            sideMat.lightingModel = .constant
-            newGeo.materials = newGeo.elements.count > 1 ? [oldMat, sideMat] : [oldMat]
+            let numElements = newGeo.elements.count
+            let oldMat = terrain.geometry?.materials.first ?? SCNMaterial()
+            applyTerrainPBRTiled(to: oldMat)
+            // Element 0 = gornja ploha (oldMat), element 1 = bočne + donja ploča (sideMat). SceneKit: materials[i] → element i.
+            if numElements > 1 {
+                let sideMat = SCNMaterial()
+                sideMat.diffuse.contents = NSColor.white
+                sideMat.ambient.contents = NSColor.white
+                sideMat.specular.contents = NSColor.darkGray
+                sideMat.isDoubleSided = true
+                sideMat.lightingModel = .physicallyBased
+                newGeo.materials = [oldMat, sideMat]
+            } else {
+                newGeo.materials = [oldMat]
+            }
             terrain.geometry = newGeo
         }
 
@@ -2361,7 +2530,7 @@ struct SceneKitMapView: NSViewRepresentable {
         var ghostNodes: [String: SCNNode] = [:]
         var lastGhostCellByObject: [String: (Int, Int)] = [:]
         var lastGridZoom: CGFloat = 1
-        var lastShowGridDots: Bool = false
+        var lastTerrainHeightsChecksum: Double = 0
         var isTerrainEditMode: Bool = false
         var onTerrainEdit: ((Int, Int) -> Void)?
         var onTerrainAddBrushSelection: ((Int, Int) -> Void)?

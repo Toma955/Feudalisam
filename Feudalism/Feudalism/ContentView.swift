@@ -223,7 +223,7 @@ struct ContentView: View {
     /// Smjer tranzicije proširenog sadržaja: true = novi dolazi s desne, stari ide ulijevo; false = obrnuto.
     @State private var bottomBarTransitionFromRight: Bool = true
     @State private var contentAreaWidth: CGFloat = 830
-    @State private var showGrid = true
+    @State private var showGrid = false
     @State private var showPivotIndicator = false
     @State private var showSettingsPopover = false
     @StateObject private var placementConsole = PlacementDebugConsole.shared

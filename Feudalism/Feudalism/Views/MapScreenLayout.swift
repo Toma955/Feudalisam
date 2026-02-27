@@ -71,29 +71,35 @@ struct LevelLoadingOverlay: View {
     }
 }
 
-/// Temeljni layout za ekran s mapom: tamna pozadina, top bar, sadržaj, opcionalni loading i overlay.
+/// Temeljni layout za ekran s mapom: opcionalna tamna pozadina, top bar, sadržaj, opcionalni loading i overlay.
 struct MapScreenLayout<TopBar: View, Content: View, CustomOverlay: View>: View {
     @ViewBuilder let topBar: () -> TopBar
     @ViewBuilder let content: () -> Content
     /// Ako nije nil, prikaže se LevelLoadingOverlay s ovom porukom.
     var loadingMessage: String?
+    /// false = bez tamne pozadine (npr. Map Editor).
+    var darkBackground: Bool
     @ViewBuilder let customOverlay: () -> CustomOverlay
 
     init(
         @ViewBuilder topBar: @escaping () -> TopBar,
         @ViewBuilder content: @escaping () -> Content,
         loadingMessage: String? = nil,
+        darkBackground: Bool = true,
         @ViewBuilder customOverlay: @escaping () -> CustomOverlay
     ) {
         self.topBar = topBar
         self.content = content
         self.loadingMessage = loadingMessage
+        self.darkBackground = darkBackground
         self.customOverlay = customOverlay
     }
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            if darkBackground {
+                Color.black.ignoresSafeArea()
+            }
 
             content()
 
@@ -117,11 +123,13 @@ extension MapScreenLayout where CustomOverlay == EmptyView {
     init(
         @ViewBuilder topBar: @escaping () -> TopBar,
         @ViewBuilder content: @escaping () -> Content,
-        loadingMessage: String? = nil
+        loadingMessage: String? = nil,
+        darkBackground: Bool = true
     ) {
         self.topBar = topBar
         self.content = content
         self.loadingMessage = loadingMessage
+        self.darkBackground = darkBackground
         self.customOverlay = { EmptyView() }
     }
 }

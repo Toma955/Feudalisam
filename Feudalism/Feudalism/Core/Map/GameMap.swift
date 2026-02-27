@@ -43,10 +43,32 @@ final class GameMap: ObservableObject {
         self.rows = rows
         self.cols = cols
         self.cells = Self.makeGrid(rows: rows, cols: cols)
+        self.vertexHeights = Self.makeInitialVertexHeights(rows: rows, cols: cols)
     }
 
-    /// Pri generiranju mape sve ćelije su G (zemlja / ground), prohodnost normalno; dodatne postavke (origin offset) u MapEditorSaveData.
-    private static func makeGrid(rows: Int, cols: Int) -> [String: MapCell] {
+    /// Inicijalizator s unaprijed pripremljenim podacima (za kreiranje na pozadinskom threadu – glavna nit ne blokira).
+    init(rows: Int, cols: Int, cells: [String: MapCell], vertexHeights: [String: CGFloat]) {
+        self.rows = rows
+        self.cols = cols
+        self.cells = cells
+        self.vertexHeights = vertexHeights
+    }
+
+    /// Svaka ćelija ima 4 točke (vrha); ne može se kreirati ćelija bez tih točaka. Inicijalizira sve vrhove mreže s elevacijom 0.
+    /// Poziva se na pozadinskom threadu pri kreiranju mape.
+    static func makeInitialVertexHeights(rows: Int, cols: Int) -> [String: CGFloat] {
+        var h: [String: CGFloat] = [:]
+        for r in 0...rows {
+            for c in 0...cols {
+                h["\(r)_\(c)"] = 0
+            }
+        }
+        return h
+    }
+
+    /// Pri generiranju mape sve ćelije su G (zemlja / ground), prohodnost normalno.
+    /// Poziva se na pozadinskom threadu pri kreiranju mape.
+    static func makeGrid(rows: Int, cols: Int) -> [String: MapCell] {
         var result: [String: MapCell] = [:]
         for r in 0..<rows {
             for c in 0..<cols {
@@ -101,6 +123,47 @@ final class GameMap: ObservableObject {
     /// Vrati elevaciju na ćeliji (0 ako ne postoji).
     func height(at coordinate: MapCoordinate) -> CGFloat {
         cell(at: coordinate)?.height ?? 0
+    }
+
+    // MARK: - Vertex visine (sjecišta mreže – jedna točka = jedan vrh)
+    /// Visine na vrhovima mreže (key "row_col", row in 0...rows, col in 0...cols). Kad prazno, teren koristi visine ćelija.
+    @Published private(set) var vertexHeights: [String: CGFloat] = [:]
+
+    /// Je li (vertexRow, vertexCol) valjana točka sjecišta? vertexRow in 0...rows, vertexCol in 0...cols.
+    func isValidVertex(vertexRow: Int, vertexCol: Int) -> Bool {
+        vertexRow >= 0 && vertexRow <= rows && vertexCol >= 0 && vertexCol <= cols
+    }
+
+    /// Visina na vrhu (sjecištu) – ako je spremljena u vertexHeights, inače prosjek ćelija koje dijele taj kut.
+    func vertexHeightAt(vertexRow: Int, vertexCol: Int) -> CGFloat {
+        let key = "\(vertexRow)_\(vertexCol)"
+        if let h = vertexHeights[key] { return h }
+        var sum: CGFloat = 0
+        var n = 0
+        for dr in 0...1 {
+            for dc in 0...1 {
+                let r = vertexRow - 1 + dr
+                let c = vertexCol - 1 + dc
+                if r >= 0, r < rows, c >= 0, c < cols {
+                    sum += height(at: MapCoordinate(row: r, col: c))
+                    n += 1
+                }
+            }
+        }
+        return n > 0 ? sum / CGFloat(n) : 0
+    }
+
+    /// Postavi visinu samo na tom vrhu (sjecištu). Map Editor – alat za točku.
+    func setVertexHeight(vertexRow: Int, vertexCol: Int, _ value: CGFloat) {
+        guard isValidVertex(vertexRow: vertexRow, vertexCol: vertexCol) else { return }
+        vertexHeights["\(vertexRow)_\(vertexCol)"] = value
+        objectWillChange.send()
+    }
+
+    /// Zamijeni sve vertex visine (npr. pri učitavanju mape).
+    func replaceVertexHeights(_ newHeights: [String: CGFloat]) {
+        vertexHeights = newHeights
+        objectWillChange.send()
     }
 
     /// Zamijeni sve ćelije (npr. pri učitavanju mape u Map Editoru).
@@ -168,7 +231,7 @@ final class GameMap: ObservableObject {
 //   – generiraju se pri uključivanju editor moda i vežu na mapu.
 
 struct MapEditorSaveData: Codable {
-    enum CodingKeys: String, CodingKey { case mapName, rows, cols, placements, cells, createdDate, originOffsetX, originOffsetZ }
+    enum CodingKeys: String, CodingKey { case mapName, rows, cols, placements, cells, createdDate, originOffsetX, originOffsetZ, vertexHeights }
     /// Ime mape (obavezno pri spremanju).
     let mapName: String
     let rows: Int
@@ -182,8 +245,10 @@ struct MapEditorSaveData: Codable {
     let originOffsetX: Double?
     /// Pomak ishodišta Z (0.0 točka) – za fino podešavanje lokacije. Nil = 0 (stare mape).
     let originOffsetZ: Double?
+    /// Visine na vrhovima mreže (sjecišta) – key "row_col". Nil = prazno (teren iz ćelija).
+    let vertexHeights: [String: Double]?
 
-    init(mapName: String, rows: Int, cols: Int, placements: [Placement], cells: [String: MapCell]? = nil, createdDate: Date? = nil, originOffsetX: Double? = 0, originOffsetZ: Double? = 0) {
+    init(mapName: String, rows: Int, cols: Int, placements: [Placement], cells: [String: MapCell]? = nil, createdDate: Date? = nil, originOffsetX: Double? = 0, originOffsetZ: Double? = 0, vertexHeights: [String: Double]? = nil) {
         self.mapName = mapName
         self.rows = rows
         self.cols = cols
@@ -192,6 +257,7 @@ struct MapEditorSaveData: Codable {
         self.createdDate = createdDate
         self.originOffsetX = originOffsetX
         self.originOffsetZ = originOffsetZ
+        self.vertexHeights = vertexHeights
     }
 
     init(from decoder: Decoder) throws {
@@ -204,6 +270,7 @@ struct MapEditorSaveData: Codable {
         createdDate = try c.decodeIfPresent(Date.self, forKey: .createdDate)
         originOffsetX = try c.decodeIfPresent(Double.self, forKey: .originOffsetX)
         originOffsetZ = try c.decodeIfPresent(Double.self, forKey: .originOffsetZ)
+        vertexHeights = try c.decodeIfPresent([String: Double].self, forKey: .vertexHeights)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -216,5 +283,6 @@ struct MapEditorSaveData: Codable {
         try c.encodeIfPresent(createdDate, forKey: .createdDate)
         try c.encodeIfPresent(originOffsetX, forKey: .originOffsetX)
         try c.encodeIfPresent(originOffsetZ, forKey: .originOffsetZ)
+        try c.encodeIfPresent(vertexHeights, forKey: .vertexHeights)
     }
 }
