@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import CoreGraphics
 
 /// Cijela mapa igre – grid ćelija za gradnju (40×40) + lista postavljenih objekata (Placement).
 final class GameMap: ObservableObject {
@@ -14,6 +15,11 @@ final class GameMap: ObservableObject {
     let rows: Int
     /// Broj stupaca (ćelija za gradnju 40×40).
     let cols: Int
+
+    /// Pomak ishodišta X (0.0 točka) u world jedinicama – za fino podešavanje lokacije mape.
+    var originOffsetX: CGFloat = 0
+    /// Pomak ishodišta Z (0.0 točka) u world jedinicama – za fino podešavanje lokacije mape.
+    var originOffsetZ: CGFloat = 0
 
     /// Side za prikaz i folder: za preset (200,400,…) vraća rows, inače rows*4 (legacy).
     var sideInSmallUnits: Int? {
@@ -39,12 +45,13 @@ final class GameMap: ObservableObject {
         self.cells = Self.makeGrid(rows: rows, cols: cols)
     }
 
+    /// Pri generiranju mape sve ćelije su G (zemlja / ground), prohodnost normalno; dodatne postavke (origin offset) u MapEditorSaveData.
     private static func makeGrid(rows: Int, cols: Int) -> [String: MapCell] {
         var result: [String: MapCell] = [:]
         for r in 0..<rows {
             for c in 0..<cols {
                 let coord = MapCoordinate(row: r, col: c)
-                result[coord.cellId] = MapCell(coordinate: coord)
+                result[coord.cellId] = MapCell(coordinate: coord, povrsina: .zemlja, prohodnost: .normalno)
             }
         }
         return result
@@ -154,13 +161,14 @@ final class GameMap: ObservableObject {
 // MARK: - Map Editor – spremanje / učitavanje mape
 // Fizička datoteka mora sadržavati:
 // - mapName, dimensions (rows, cols)
+// - originOffsetX, originOffsetZ (0.0 točka + fino podešavanje lokacije)
 // - Runtime (u igri) po tileu: id (izveden iz row,col), row/col, height/elevation, terrainType, walkable
 // - placements (objekti na mapi)
 // Editor-only (selected, hovered, brushPreview, tempHeightDelta, paintMask, debugFlags, undo/redo) se NE spremaju
 //   – generiraju se pri uključivanju editor moda i vežu na mapu.
 
 struct MapEditorSaveData: Codable {
-    enum CodingKeys: String, CodingKey { case mapName, rows, cols, placements, cells, createdDate }
+    enum CodingKeys: String, CodingKey { case mapName, rows, cols, placements, cells, createdDate, originOffsetX, originOffsetZ }
     /// Ime mape (obavezno pri spremanju).
     let mapName: String
     let rows: Int
@@ -170,14 +178,20 @@ struct MapEditorSaveData: Codable {
     let cells: [String: MapCell]?
     /// Datum izgradnje/kreiranja mape (postavlja se pri prvom spremanju).
     let createdDate: Date?
+    /// Pomak ishodišta X (0.0 točka) – za fino podešavanje lokacije. Nil = 0 (stare mape).
+    let originOffsetX: Double?
+    /// Pomak ishodišta Z (0.0 točka) – za fino podešavanje lokacije. Nil = 0 (stare mape).
+    let originOffsetZ: Double?
 
-    init(mapName: String, rows: Int, cols: Int, placements: [Placement], cells: [String: MapCell]? = nil, createdDate: Date? = nil) {
+    init(mapName: String, rows: Int, cols: Int, placements: [Placement], cells: [String: MapCell]? = nil, createdDate: Date? = nil, originOffsetX: Double? = 0, originOffsetZ: Double? = 0) {
         self.mapName = mapName
         self.rows = rows
         self.cols = cols
         self.placements = placements
         self.cells = cells
         self.createdDate = createdDate
+        self.originOffsetX = originOffsetX
+        self.originOffsetZ = originOffsetZ
     }
 
     init(from decoder: Decoder) throws {
@@ -188,6 +202,8 @@ struct MapEditorSaveData: Codable {
         placements = try c.decode([Placement].self, forKey: .placements)
         cells = try c.decodeIfPresent([String: MapCell].self, forKey: .cells)
         createdDate = try c.decodeIfPresent(Date.self, forKey: .createdDate)
+        originOffsetX = try c.decodeIfPresent(Double.self, forKey: .originOffsetX)
+        originOffsetZ = try c.decodeIfPresent(Double.self, forKey: .originOffsetZ)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -198,5 +214,7 @@ struct MapEditorSaveData: Codable {
         try c.encode(placements, forKey: .placements)
         try c.encodeIfPresent(cells, forKey: .cells)
         try c.encodeIfPresent(createdDate, forKey: .createdDate)
+        try c.encodeIfPresent(originOffsetX, forKey: .originOffsetX)
+        try c.encodeIfPresent(originOffsetZ, forKey: .originOffsetZ)
     }
 }

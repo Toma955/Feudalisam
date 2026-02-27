@@ -24,6 +24,8 @@ struct MapEditorChoiceView: View {
     @State private var loadErrorMessage: String?
     /// Kad je postavljen, prikaži listu mapa za taj slot da korisnik odabere koju učitati.
     @State private var mapPickerSlot: MapEditorSlot?
+    /// Mapa koju korisnik želi izbrisati – prikaže se alert za potvrdu.
+    @State private var entryToDelete: MapCatalogEntry?
 
     var body: some View {
         Group {
@@ -53,6 +55,24 @@ struct MapEditorChoiceView: View {
             }
         } message: {
             if let msg = loadErrorMessage { Text(msg) }
+        }
+        .alert("Izbrisati mapu?", isPresented: Binding(
+            get: { entryToDelete != nil },
+            set: { if !$0 { entryToDelete = nil } }
+        )) {
+            Button("Odustani", role: .cancel) {
+                entryToDelete = nil
+            }
+            Button("Izbriši cijelu datoteku", role: .destructive) {
+                if let entry = entryToDelete {
+                    _ = gameState.deleteEditorMap(entry: entry)
+                    entryToDelete = nil
+                }
+            }
+        } message: {
+            if let entry = entryToDelete {
+                Text("Mapa „\(entry.displayName)” (\(entry.rows)×\(entry.cols)) bit će trajno izbrisana. Cijela datoteka mape uklanja se s diska.")
+            }
         }
     }
 
@@ -229,32 +249,45 @@ struct MapEditorChoiceView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 10) {
                     ForEach(entries) { entry in
-                        Button {
-                            if gameState.loadEditorMap(entry: entry) {
-                                gameState.openMapEditorAfterLoad()
-                                mapPickerSlot = nil
-                                isPresented = false
-                            } else {
-                                loadErrorMessage = "Učitavanje mape nije uspjelo."
-                                loadErrorSlot = slot
+                        HStack(spacing: 0) {
+                            Button {
+                                if gameState.loadEditorMap(entry: entry) {
+                                    gameState.openMapEditorAfterLoad()
+                                    mapPickerSlot = nil
+                                    isPresented = false
+                                } else {
+                                    loadErrorMessage = "Učitavanje mape nije uspjelo."
+                                    loadErrorSlot = slot
+                                }
+                            } label: {
+                                HStack {
+                                    Text(entry.displayName)
+                                        .font(.system(size: 15, weight: .medium))
+                                        .foregroundStyle(.white.opacity(0.95))
+                                    Spacer(minLength: 0)
+                                    Text("\(entry.side)×\(entry.side)")
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(.white.opacity(0.7))
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
-                        } label: {
-                            HStack {
-                                Text(entry.displayName)
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundStyle(.white.opacity(0.95))
-                                Spacer(minLength: 0)
-                                Text("\(entry.side)×\(entry.side)")
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(.white.opacity(0.7))
+                            .buttonStyle(.plain)
+
+                            Button {
+                                entryToDelete = entry
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(.white.opacity(0.8))
+                                    .frame(width: 44, height: 44)
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.white.opacity(0.15))
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .buttonStyle(.plain)
+                            .help("Izbriši cijelu datoteku mape")
                         }
-                        .buttonStyle(.plain)
+                        .background(Color.white.opacity(0.15))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                 }
                 .padding(.vertical, 4)

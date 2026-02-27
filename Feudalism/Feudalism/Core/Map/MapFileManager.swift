@@ -51,7 +51,9 @@ enum MapFileManager {
             cols: cols,
             placements: [],
             cells: gameMap.cells,
-            createdDate: Date()
+            createdDate: Date(),
+            originOffsetX: 0,
+            originOffsetZ: 0
         )
 
         MapStorage.createSizeFoldersIfNeeded()

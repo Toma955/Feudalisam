@@ -10,7 +10,7 @@ import Foundation
 
 /// Jedna ćelija mape (1×1 u gridu za gradnju) – runtime podaci u datoteci:
 /// id, x/y, textureId, objectIds, terrain, height (elevacija; može u minus), resource,
-/// walkable, buildable, canAfforest, canDigChannels.
+/// walkable, buildable, canAfforest, canDigChannels, površina (G=zemlja), prohodnost.
 struct MapCell: Identifiable, Codable {
     var id: String { coordinate.cellId }
     let coordinate: MapCoordinate
@@ -31,8 +31,24 @@ struct MapCell: Identifiable, Codable {
     var canAfforest: Bool = false
     /// Može li se kopati kanal (kupanje kanala).
     var canDigChannels: Bool = false
+    /// Tip površine (G=zemlja, W=voda, P=ravnica, …). Default G.
+    var povrsina: PovrsinaType = .zemlja
+    /// Prohodnost – koliko brzo se može kretati (N, V, S, G, B). Default G = normalno.
+    var prohodnost: ProhodnostType = .normalno
 
-    init(coordinate: MapCoordinate, textureId: String = "grass", objectIds: [String] = [], terrain: TerrainType = .grass, height: CGFloat = 0, resource: ResourceType? = nil, walkable: Bool? = nil, buildable: Bool? = nil, canAfforest: Bool = false, canDigChannels: Bool = false) {
+    /// Pojedinačne točke (vrhovi) kocke – 4 kuta ćelije, svaka s vlastitom koordinatom. Izvedeno iz generalne koordinate.
+    var points: [MapCellPoint] {
+        let r = Double(coordinate.row)
+        let c = Double(coordinate.col)
+        return [
+            MapCellPoint(row: r, col: c, index: 0),       // gornji lijevi
+            MapCellPoint(row: r, col: c + 1, index: 1),    // gornji desni
+            MapCellPoint(row: r + 1, col: c, index: 2),   // donji lijevi
+            MapCellPoint(row: r + 1, col: c + 1, index: 3) // donji desni
+        ]
+    }
+
+    init(coordinate: MapCoordinate, textureId: String = "grass", objectIds: [String] = [], terrain: TerrainType = .grass, height: CGFloat = 0, resource: ResourceType? = nil, walkable: Bool? = nil, buildable: Bool? = nil, canAfforest: Bool = false, canDigChannels: Bool = false, povrsina: PovrsinaType = .zemlja, prohodnost: ProhodnostType = .normalno) {
         self.coordinate = coordinate
         self.textureId = textureId
         self.objectIds = objectIds
@@ -43,10 +59,12 @@ struct MapCell: Identifiable, Codable {
         self.buildable = buildable ?? terrain.defaultBuildable
         self.canAfforest = canAfforest
         self.canDigChannels = canDigChannels
+        self.povrsina = povrsina
+        self.prohodnost = prohodnost
     }
 
     enum CodingKeys: String, CodingKey {
-        case coordinate, textureId, objectIds, terrain, height, resource, walkable, buildable, canAfforest, canDigChannels
+        case coordinate, textureId, objectIds, terrain, height, resource, walkable, buildable, canAfforest, canDigChannels, povrsina, prohodnost
     }
 
     init(from decoder: Decoder) throws {
@@ -62,6 +80,8 @@ struct MapCell: Identifiable, Codable {
         buildable = try c.decodeIfPresent(Bool.self, forKey: .buildable) ?? terrain.defaultBuildable
         canAfforest = try c.decodeIfPresent(Bool.self, forKey: .canAfforest) ?? false
         canDigChannels = try c.decodeIfPresent(Bool.self, forKey: .canDigChannels) ?? false
+        povrsina = try c.decodeIfPresent(PovrsinaType.self, forKey: .povrsina) ?? .zemlja
+        prohodnost = try c.decodeIfPresent(ProhodnostType.self, forKey: .prohodnost) ?? .normalno
     }
 
     func encode(to encoder: Encoder) throws {
@@ -76,5 +96,7 @@ struct MapCell: Identifiable, Codable {
         try c.encode(buildable, forKey: .buildable)
         try c.encode(canAfforest, forKey: .canAfforest)
         try c.encode(canDigChannels, forKey: .canDigChannels)
+        try c.encode(povrsina, forKey: .povrsina)
+        try c.encode(prohodnost, forKey: .prohodnost)
     }
 }

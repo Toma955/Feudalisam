@@ -1,1 +1,1 @@
-{"maps":[{"cols":50,"displayName":"ab","slot":"solo","suggestedPlayers":"1-2","tags":["solo","1v1"],"path":"200x200\/map_editor_solo.json","rows":50,"sizeCategory":"small"},{"cols":200,"displayName":"a","slot":"solo","suggestedPlayers":"1-2","tags":["solo","1v1"],"path":"200x200\/a.json","rows":200,"sizeCategory":"small"}],"updatedAt":793752536.841032}
+{"maps":[{"suggestedPlayers":"1-2","cols":200,"sizeCategory":"small","rows":200,"tags":["solo","1v1"],"slot":"solo","path":"200x200\/a.json","displayName":"a"}],"updatedAt":793885409.138351}

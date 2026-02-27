@@ -403,6 +403,8 @@ final class GameState: ObservableObject {
         let newMap = GameMap(rows: data.rows, cols: data.cols)
         newMap.replacePlacements(data.placements)
         if let cells = data.cells { newMap.replaceCells(cells) }
+        newMap.originOffsetX = CGFloat(data.originOffsetX ?? 0)
+        newMap.originOffsetZ = CGFloat(data.originOffsetZ ?? 0)
         gameMap = newMap
     }
 
@@ -560,7 +562,7 @@ extension GameState {
             return (false, "Mape se moraju spremati unutar projekta. Postavite Xcode → Edit Scheme → Run → Options → Working Directory = $(PROJECT_DIR).")
         }
         let fileName = MapStorage.fileName(forMapName: name, slotFallback: targetSlot)
-        let data = MapEditorSaveData(mapName: name, rows: gameMap.rows, cols: gameMap.cols, placements: gameMap.placements, cells: gameMap.cells, createdDate: mapEditorCreatedDate ?? Date())
+        let data = MapEditorSaveData(mapName: name, rows: gameMap.rows, cols: gameMap.cols, placements: gameMap.placements, cells: gameMap.cells, createdDate: mapEditorCreatedDate ?? Date(), originOffsetX: Double(gameMap.originOffsetX), originOffsetZ: Double(gameMap.originOffsetZ))
         guard let fileURL = MapStorage.fileURL(rows: gameMap.rows, cols: gameMap.cols, fileName: fileName) else {
             let side = gameMap.rows * MapScale.smallCellsPerObjectCubeSide
             return (false, "Nije moguće odrediti putanju za spremanje. Veličina mape \(gameMap.displayDimensionString) možda nije dopuštena (200, 400, 600, 800, 1000). Putanja: \(MapStorage.mapsRootPath())")
@@ -619,6 +621,8 @@ extension GameState {
         let newMap = GameMap(rows: data.rows, cols: data.cols)
         newMap.replacePlacements(data.placements)
         if let cells = data.cells { newMap.replaceCells(cells) }
+        newMap.originOffsetX = CGFloat(data.originOffsetX ?? 0)
+        newMap.originOffsetZ = CGFloat(data.originOffsetZ ?? 0)
         gameMap = newMap
     }
 
@@ -656,7 +660,7 @@ extension GameState {
         guard let newURL = MapStorage.fileURL(rows: data.rows, cols: data.cols, fileName: fileName) else {
             return (false, "Neispravna veličina mape.")
         }
-        let newData = MapEditorSaveData(mapName: name, rows: data.rows, cols: data.cols, placements: data.placements, cells: data.cells, createdDate: data.createdDate)
+        let newData = MapEditorSaveData(mapName: name, rows: data.rows, cols: data.cols, placements: data.placements, cells: data.cells, createdDate: data.createdDate, originOffsetX: data.originOffsetX, originOffsetZ: data.originOffsetZ)
         let (saved, saveError) = MapFileManager.save(data: newData, to: newURL)
         guard saved else { return (false, saveError ?? "Spremanje nije uspjelo.") }
         if let rel = MapStorage.relativePath(rows: data.rows, cols: data.cols, fileName: fileName) {
@@ -686,28 +690,33 @@ enum TerrainToolOption: String, CaseIterable {
     case flatten = "Izravnaj"
 }
 
-/// Jedan odabir četkice terena: 3 kocke (mala, srednja, velika) ili 3 kruga (mali, srednji, veliki). Samo jedan može biti izabran.
+/// Četkica terena: samo kockice, 4 veličine (1×1, 3×3, 6×6, 12×12). Stranica = 2*radius+1.
 enum TerrainBrushOption: String, CaseIterable {
-    case kockaMala
-    case kockaSrednja
-    case kockaVelika
-    case krugMali
-    case krugSrednji
-    case krugVeliki
+    case size1   // 1×1 – jedna ćelija
+    case size3   // 3×3
+    case size6   // 6×6 (zapravo 7×7: radius 3)
+    case size12  // 12×12 (zapravo 13×13: radius 6)
 
-    /// Mala = 1×1, srednja = 3×3, velika = 9×9 (stranica = 2*radius+1).
+    /// Polumjer četkice (stranica = 2*radius+1).
     var radius: Int {
         switch self {
-        case .kockaMala, .krugMali: return 0   // 1×1
-        case .kockaSrednja, .krugSrednji: return 1   // 3×3
-        case .kockaVelika, .krugVeliki: return 4   // 9×9
+        case .size1: return 0   // 1×1
+        case .size3: return 1   // 3×3
+        case .size6: return 3   // 7×7 (najbliže 6×6)
+        case .size12: return 6  // 13×13 (najbliže 12×12)
         }
     }
 
-    var isSquare: Bool {
+    /// Uvijek kvadrat (samo kockice, nema krugova).
+    var isSquare: Bool { true }
+
+    /// Oznaka za UI (1×1, 3×3, 6×6, 12×12).
+    var displayLabel: String {
         switch self {
-        case .kockaMala, .kockaSrednja, .kockaVelika: return true
-        case .krugMali, .krugSrednji, .krugVeliki: return false
+        case .size1: return "1×1"
+        case .size3: return "3×3"
+        case .size6: return "6×6"
+        case .size12: return "12×12"
         }
     }
 }
@@ -779,7 +788,7 @@ extension GameState {
         objectWillChange.send()
     }
 
-    /// Dodaj u odabir sve ćelije u obliku četkice (3 kruga / 3 kocke = selectori za označavanje ćelija koje će ići gore/dolje).
+    /// Dodaj u odabir sve ćelije u obliku četkice (kockica 1×1, 3×3, 6×6 ili 12×12).
     func addBrushRegionToSelection(centerRow: Int, centerCol: Int, brushOption: TerrainBrushOption) {
         guard let editorState = mapEditorState else { return }
         let r = brushOption.radius

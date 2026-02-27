@@ -116,7 +116,10 @@ private func makeTerrainTexture(gameMap: GameMap? = nil, useWhiteBackground: Boo
 /// Orijentacija terena: ravnina u XZ (width = X, height = Z), usklađeno s mrežom za crtanje objekata.
 private let terrainPlaneRotationX: CGFloat = -.pi / 2
 
-/// Mesh terena iz visina ćelija (10×10 mjeri elevaciju). Koristi se u Map Editoru kad se mijenja elevacija.
+/// Boja bočnih strana i donje plohe podignutih kocki (tamnija od vrha).
+private let terrainSideColor = NSColor(white: 0.32, alpha: 1)
+
+/// Mesh terena: gornja ploča po ćeliji + za podignute ćelije (h>0) donja ploča i 4 bočne strane (puna kocka).
 private func makeTerrainGeometryWithHeights(gameMap: GameMap) -> SCNGeometry? {
     let rows = gameMap.rows
     let cols = gameMap.cols
@@ -125,45 +128,34 @@ private func makeTerrainGeometryWithHeights(gameMap: GameMap) -> SCNGeometry? {
     let halfH = effectiveMapWorldH(rows: rows) / 2
     let stepW = worldUnitsPerCell
     let stepH = worldUnitsPerCell
+    let baseZ: CGFloat = 0
     func heightAt(row: Int, col: Int) -> CGFloat {
         gameMap.cell(row: row, col: col)?.height ?? 0
     }
-    func vertexHeight(r: Int, c: Int) -> CGFloat {
-        var sum: CGFloat = 0
-        var n = 0
-        for dr in 0...1 {
-            for dc in 0...1 {
-                let rr = r - 1 + dr
-                let cc = c - 1 + dc
-                if rr >= 0, rr < rows, cc >= 0, cc < cols {
-                    sum += heightAt(row: rr, col: cc)
-                    n += 1
-                }
-            }
-        }
-        return n > 0 ? sum / CGFloat(n) : 0
-    }
-    // Čvor terena ima eulerAngles.x = -π/2: lokalni (x,y,z) → svijet (x, z, -y). Da elevacija bude u svijet Y, koristimo lokalni (x, -z, visina).
     var vertices: [SCNVector3] = []
     var uvs: [CGPoint] = []
-    // UV: u = col, v = row (row 0 = v 0 u teksturi; slika ima row 0 na dnu = V=0).
-    for r in 0...(rows) {
-        for c in 0...(cols) {
-            let x = -halfW + CGFloat(c) * stepW
-            let z = -halfH + CGFloat(r) * stepH
-            let h = vertexHeight(r: r, c: c)
-            vertices.append(SCNVector3(x, -z, h))
-            uvs.append(CGPoint(x: CGFloat(c) / CGFloat(cols), y: CGFloat(r) / CGFloat(rows)))
-        }
-    }
-    var indices: [Int32] = []
+    var topIndices: [Int32] = []
     for r in 0..<rows {
         for c in 0..<cols {
-            let i00 = Int32(r * (cols + 1) + c)
-            let i10 = Int32((r + 1) * (cols + 1) + c)
-            let i11 = Int32((r + 1) * (cols + 1) + (c + 1))
-            let i01 = Int32(r * (cols + 1) + (c + 1))
-            indices.append(contentsOf: [i00, i01, i10, i01, i11, i10])
+            let h = heightAt(row: r, col: c)
+            let x0 = -halfW + CGFloat(c) * stepW
+            let x1 = -halfW + CGFloat(c + 1) * stepW
+            let z0 = -halfH + CGFloat(r) * stepH
+            let z1 = -halfH + CGFloat(r + 1) * stepH
+            let base = Int32(vertices.count)
+            vertices.append(SCNVector3(x0, -z0, h))
+            vertices.append(SCNVector3(x1, -z0, h))
+            vertices.append(SCNVector3(x1, -z1, h))
+            vertices.append(SCNVector3(x0, -z1, h))
+            let u0 = CGFloat(c) / CGFloat(cols)
+            let u1 = CGFloat(c + 1) / CGFloat(cols)
+            let v0 = CGFloat(r) / CGFloat(rows)
+            let v1 = CGFloat(r + 1) / CGFloat(rows)
+            uvs.append(CGPoint(x: u0, y: v0))
+            uvs.append(CGPoint(x: u1, y: v0))
+            uvs.append(CGPoint(x: u1, y: v1))
+            uvs.append(CGPoint(x: u0, y: v1))
+            topIndices.append(contentsOf: [base, base + 1, base + 2, base, base + 2, base + 3])
         }
     }
     func triNormal(_ a: SCNVector3, _ b: SCNVector3, _ c: SCNVector3) -> SCNVector3 {
@@ -176,21 +168,45 @@ private func makeTerrainGeometryWithHeights(gameMap: GameMap) -> SCNGeometry? {
         guard len > 1e-6 else { return SCNVector3(0, 1, 0) }
         return SCNVector3(nx / len, ny / len, nz / len)
     }
-    var normalAccum: [SCNVector3] = Array(repeating: SCNVector3(0, 0, 0), count: vertices.count)
-    for i in stride(from: 0, to: indices.count, by: 3) {
-        let ia = Int(indices[i]), ib = Int(indices[i + 1]), ic = Int(indices[i + 2])
+    var normals: [SCNVector3] = Array(repeating: SCNVector3(0, 0, 0), count: vertices.count)
+    for i in stride(from: 0, to: topIndices.count, by: 3) {
+        let ia = Int(topIndices[i]), ib = Int(topIndices[i + 1]), ic = Int(topIndices[i + 2])
         let n = triNormal(vertices[ia], vertices[ib], vertices[ic])
-        normalAccum[ia].x += n.x; normalAccum[ia].y += n.y; normalAccum[ia].z += n.z
-        normalAccum[ib].x += n.x; normalAccum[ib].y += n.y; normalAccum[ib].z += n.z
-        normalAccum[ic].x += n.x; normalAccum[ic].y += n.y; normalAccum[ic].z += n.z
+        normals[ia].x += n.x; normals[ia].y += n.y; normals[ia].z += n.z
+        normals[ib].x += n.x; normals[ib].y += n.y; normals[ib].z += n.z
+        normals[ic].x += n.x; normals[ic].y += n.y; normals[ic].z += n.z
     }
-    let normals = normalAccum.map { n -> SCNVector3 in
+    var sideBottomIndices: [Int32] = []
+    for r in 0..<rows {
+        for c in 0..<cols {
+            let h = heightAt(row: r, col: c)
+            guard h > 0 else { continue }
+            let x0 = -halfW + CGFloat(c) * stepW
+            let x1 = -halfW + CGFloat(c + 1) * stepW
+            let z0 = -halfH + CGFloat(r) * stepH
+            let z1 = -halfH + CGFloat(r + 1) * stepH
+            func addQuad(_ v: [SCNVector3], _ n: SCNVector3, winding: [Int]) {
+                let b = Int32(vertices.count)
+                vertices.append(contentsOf: v)
+                for _ in 0..<4 { normals.append(n); uvs.append(CGPoint(x: 0, y: 0)) }
+                sideBottomIndices.append(contentsOf: [b + Int32(winding[0]), b + Int32(winding[1]), b + Int32(winding[2]), b + Int32(winding[0]), b + Int32(winding[2]), b + Int32(winding[3])])
+            }
+            // Donja ploča (z = baseZ), normala (0,0,-1)
+            addQuad([SCNVector3(x0, -z0, baseZ), SCNVector3(x1, -z0, baseZ), SCNVector3(x1, -z1, baseZ), SCNVector3(x0, -z1, baseZ)], SCNVector3(0, 0, -1), winding: [0, 2, 1, 3])
+            // 4 bočne strane
+            addQuad([SCNVector3(x0, -z0, baseZ), SCNVector3(x1, -z0, baseZ), SCNVector3(x1, -z0, h), SCNVector3(x0, -z0, h)], SCNVector3(0, -1, 0), winding: [0, 1, 2, 3])
+            addQuad([SCNVector3(x0, -z1, baseZ), SCNVector3(x1, -z1, baseZ), SCNVector3(x1, -z1, h), SCNVector3(x0, -z1, h)], SCNVector3(0, 1, 0), winding: [0, 2, 1, 3])
+            addQuad([SCNVector3(x0, -z0, baseZ), SCNVector3(x0, -z1, baseZ), SCNVector3(x0, -z1, h), SCNVector3(x0, -z0, h)], SCNVector3(-1, 0, 0), winding: [0, 2, 1, 3])
+            addQuad([SCNVector3(x1, -z0, baseZ), SCNVector3(x1, -z1, baseZ), SCNVector3(x1, -z1, h), SCNVector3(x1, -z0, h)], SCNVector3(1, 0, 0), winding: [0, 1, 2, 3])
+        }
+    }
+    let normalsN = normals.map { n -> SCNVector3 in
         let len = sqrt(n.x * n.x + n.y * n.y + n.z * n.z)
         guard len > 1e-6 else { return SCNVector3(0, 1, 0) }
         return SCNVector3(n.x / len, n.y / len, n.z / len)
     }
     let vertexSource = SCNGeometrySource(vertices: vertices)
-    let normalSource = SCNGeometrySource(normals: normals)
+    let normalSource = SCNGeometrySource(normals: normalsN)
     let uvData = uvs.map { [Float($0.x), Float($0.y)] }.flatMap { $0 }
     let uvSource = SCNGeometrySource(
         data: Data(bytes: uvData, count: uvData.count * MemoryLayout<Float>.size),
@@ -202,8 +218,9 @@ private func makeTerrainGeometryWithHeights(gameMap: GameMap) -> SCNGeometry? {
         dataOffset: 0,
         dataStride: MemoryLayout<Float>.size * 2
     )
-    let element = SCNGeometryElement(indices: indices, primitiveType: .triangles)
-    return SCNGeometry(sources: [vertexSource, normalSource, uvSource], elements: [element])
+    let topElement = SCNGeometryElement(indices: topIndices, primitiveType: .triangles)
+    let elements: [SCNGeometryElement] = sideBottomIndices.isEmpty ? [topElement] : [topElement, SCNGeometryElement(indices: sideBottomIndices, primitiveType: .triangles)]
+    return SCNGeometry(sources: [vertexSource, normalSource, uvSource], elements: elements)
 }
 
 /// Transformacija teksture: okreni V da se slika terena (row 0 na dnu) uskladi s world Z (row 0 = min Z).
@@ -845,7 +862,7 @@ private func terrainHeightAtWorld(x: CGFloat, z: CGFloat, gameMap: GameMap, rows
     return (1 - tx) * (1 - tz) * h00 + tx * (1 - tz) * h01 + (1 - tx) * tz * h10 + tx * tz * h11
 }
 
-/// Zelena površina (3D mesh) nad zadanim ćelijama – prati visine terena. World koordinate: Y = visina.
+/// Zelena površina samo nad označenim ćelijama: ravni quad po ćeliji na visini te ćelije (Y = visina, horizontalno u XZ – ostale ćelije na miru).
 private func makeGreenSurfaceGeometry(gameMap: GameMap, cells: Set<MapCoordinate>, rows: Int, cols: Int) -> SCNGeometry? {
     guard !cells.isEmpty else { return nil }
     let halfW = effectiveMapWorldW(cols: cols) / 2
@@ -856,19 +873,16 @@ private func makeGreenSurfaceGeometry(gameMap: GameMap, cells: Set<MapCoordinate
     for coord in cells {
         let (r, c) = (coord.row, coord.col)
         guard r >= 0, r < rows, c >= 0, c < cols else { continue }
-        let h00 = vertexHeightAtCorner(r: r, c: c, gameMap: gameMap)
-        let h01 = vertexHeightAtCorner(r: r, c: c + 1, gameMap: gameMap)
-        let h11 = vertexHeightAtCorner(r: r + 1, c: c + 1, gameMap: gameMap)
-        let h10 = vertexHeightAtCorner(r: r + 1, c: c, gameMap: gameMap)
+        let h = gameMap.cell(row: r, col: c)?.height ?? 0
         let x0 = CGFloat(c) * step - halfW
         let x1 = CGFloat(c + 1) * step - halfW
         let z0 = CGFloat(r) * step - halfH
         let z1 = CGFloat(r + 1) * step - halfH
         let base = Int32(vertices.count)
-        vertices.append(SCNVector3(x0, h00, z0))
-        vertices.append(SCNVector3(x1, h01, z0))
-        vertices.append(SCNVector3(x1, h11, z1))
-        vertices.append(SCNVector3(x0, h10, z1))
+        vertices.append(SCNVector3(x0, h, z0))
+        vertices.append(SCNVector3(x1, h, z0))
+        vertices.append(SCNVector3(x1, h, z1))
+        vertices.append(SCNVector3(x0, h, z1))
         indices.append(contentsOf: [base, base + 1, base + 2, base, base + 2, base + 3])
     }
     guard !vertices.isEmpty else { return nil }
@@ -908,7 +922,7 @@ private func makeGreenSurfaceGeometry(gameMap: GameMap, cells: Set<MapCoordinate
     return geo
 }
 
-/// Ćelije koje četkica pokriva (kvadrat ili krug).
+/// Ćelije koje četkica pokriva (kockica: 1×1, 3×3, 6×6, 12×12).
 private func brushCells(centerRow: Int, centerCol: Int, brushOption: TerrainBrushOption, rows: Int, cols: Int) -> Set<MapCoordinate> {
     let r = brushOption.radius
     var cells: Set<MapCoordinate> = []
@@ -965,8 +979,10 @@ struct SceneKitMapView: NSViewRepresentable {
     var terrainTool: TerrainToolOption? = nil
     var terrainBrushOption: TerrainBrushOption? = nil
     var onTerrainEdit: ((Int, Int) -> Void)? = nil
-    /// Map Editor – klik dodaje regiju u obliku četkice u odabir (3 kruga/3 kocke = selectori).
+    /// Map Editor – klik primjenjuje četkicu (kockica 1×1, 3×3, 6×6, 12×12).
     var onTerrainAddBrushSelection: ((Int, Int) -> Void)? = nil
+    /// Map Editor – mod „Odabir ćelija”: klik uključuje/isključuje ćeliju u označene (toggle).
+    var onCellSelectionToggle: ((Int, Int) -> Void)? = nil
     /// Map Editor – mod „Odabir ćelija”: klik označuje/uklanja jednu ćeliju (precizno).
     var isCellSelectionMode: Bool = false
     var isPlaceMode: Bool { gameState.selectedPlacementObjectId != nil }
@@ -1251,7 +1267,7 @@ struct SceneKitMapView: NSViewRepresentable {
         coord.mapCols = cols
         setupPlacementTemplatesAndGhosts(coord: coord, scene: scene, loader: loader)
 
-        let opt = terrainBrushOption ?? .kockaMala
+        let opt = terrainBrushOption ?? .size1
         let brushPreviewOverlay = SCNNode()
         brushPreviewOverlay.name = "brushPreviewOverlay"
         brushPreviewOverlay.renderingOrder = 400
@@ -1425,6 +1441,11 @@ struct SceneKitMapView: NSViewRepresentable {
         container.installTrackpadMonitorsIfNeeded()
         container.onClick = { [weak container, gameState, coord] row, col in
             guard let container else { return }
+            if let cb = coord.onCellSelectionToggle {
+                cb(row, col)
+                DispatchQueue.main.async { gameState.objectWillChange.send() }
+                return
+            }
             if let cb = coord.onTerrainAddBrushSelection {
                 cb(row, col)
                 DispatchQueue.main.async { gameState.objectWillChange.send() }
@@ -1471,10 +1492,12 @@ struct SceneKitMapView: NSViewRepresentable {
         coord.isTerrainEditMode = isTerrainEditMode
         coord.onTerrainEdit = onTerrainEdit
         coord.onTerrainAddBrushSelection = onTerrainAddBrushSelection
+        coord.onCellSelectionToggle = onCellSelectionToggle
         container.handPanMode = handPanMode
         container.isEraseMode = isEraseMode
+        container.isCellSelectionMode = isCellSelectionMode
         container.hasObjectSelected = isPlaceMode && !isTerrainEditMode
-        container.cameraPanAllowed = !isPlaceMode && !isTerrainEditMode && !isEraseMode
+        container.cameraPanAllowed = !isPlaceMode && !isTerrainEditMode && !isEraseMode && !isCellSelectionMode
         container.currentSelectedPlacementObjectId = gameState.selectedPlacementObjectId
         container.useTrackpad = gameState.inputDevice == .trackpad
         if container.useTrackpad {
@@ -1496,8 +1519,9 @@ struct SceneKitMapView: NSViewRepresentable {
         coord.isTerrainEditMode = isTerrainEditMode
         coord.onTerrainEdit = onTerrainEdit
         coord.onTerrainAddBrushSelection = onTerrainAddBrushSelection
+        coord.onCellSelectionToggle = onCellSelectionToggle
         if isTerrainEditMode && !wasTerrain {
-            Task { @MainActor in MapEditorConsole.shared.append("Teren: selector uključen (zelena kocka/krug prati miš)") }
+            Task { @MainActor in MapEditorConsole.shared.append("Teren: selector uključen (zelena kockica prati miš)") }
         }
         if !isTerrainEditMode {
             coord.brushPreviewOverlayNode?.isHidden = true
@@ -1628,9 +1652,15 @@ struct SceneKitMapView: NSViewRepresentable {
                 m.lightingModel = .constant
                 return m
             }()
-            // Mesh s visinama koristi vlastite UV (r/rows, c/cols) – bez flipa.
+            oldMat.diffuse.contents = makeTerrainTexture(gameMap: gameState.gameMap, useWhiteBackground: gameState.isMapEditorMode) ?? terrainFallbackColor
             oldMat.diffuse.contentsTransform = SCNMatrix4Identity
-            newGeo.materials = [oldMat]
+            let sideMat = SCNMaterial()
+            sideMat.diffuse.contents = terrainSideColor
+            sideMat.ambient.contents = NSColor.black
+            sideMat.specular.contents = NSColor.black
+            sideMat.isDoubleSided = true
+            sideMat.lightingModel = .constant
+            newGeo.materials = newGeo.elements.count > 1 ? [oldMat, sideMat] : [oldMat]
             terrain.geometry = newGeo
         }
 
@@ -2335,6 +2365,7 @@ struct SceneKitMapView: NSViewRepresentable {
         var isTerrainEditMode: Bool = false
         var onTerrainEdit: ((Int, Int) -> Void)?
         var onTerrainAddBrushSelection: ((Int, Int) -> Void)?
+        var onCellSelectionToggle: ((Int, Int) -> Void)?
         var terrainBrushOption: TerrainBrushOption?
         /// Map Editor – zelena površina na terenu za područje pod mišem (bez letećeg elementa).
         var brushPreviewOverlayNode: SCNNode?
