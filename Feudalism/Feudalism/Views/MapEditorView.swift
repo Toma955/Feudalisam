@@ -38,6 +38,8 @@ private let editorBottomBarSpacing: CGFloat = 12
 
 struct MapEditorView: View {
     @EnvironmentObject private var gameState: GameState
+    @StateObject private var mapEditorConsole = MapEditorConsole.shared
+    @State private var showConsole = true
     @State private var gridShow10 = true
     @State private var gridShow40 = false
     @State private var showGridDots = false
@@ -47,7 +49,7 @@ struct MapEditorView: View {
     @State private var showSaveLoadAlert = false
     @State private var selectedEditorCategory: MapEditorBottomCategory = .građevine
     @State private var terrainToolOption: TerrainToolOption = .raise5
-    @State private var terrainBrushOption: TerrainBrushOption = .kockaSrednja
+    @State private var terrainBrushOption: TerrainBrushOption = .kockaMala
 
     var body: some View {
         MapScreenLayout(
@@ -64,9 +66,11 @@ struct MapEditorView: View {
                     isTerrainEditMode: selectedEditorCategory == .teren,
                     terrainTool: selectedEditorCategory == .teren ? terrainToolOption : nil,
                     terrainBrushOption: selectedEditorCategory == .teren ? terrainBrushOption : nil,
-                    onTerrainEdit: { r, c in
+                    onTerrainEdit: nil,
+                    onTerrainAddBrushSelection: selectedEditorCategory == .teren ? { r, c in
                         gameState.applyTerrainElevation(centerRow: r, centerCol: c, tool: terrainToolOption, brushOption: terrainBrushOption)
-                    }
+                    } : nil,
+                    isCellSelectionMode: false
                 )
                 .ignoresSafeArea()
             },
@@ -88,7 +92,7 @@ struct MapEditorView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .allowsHitTesting(false)
 
-                    // Opcije alata za teren (kad je Teren odabran): Podigni za 5/10, Izravnaj
+                    // Opcije alata za teren (kad je Teren odabran): Podigni za 5/10, Spusti, Izravnaj
                     if selectedEditorCategory == .teren {
                         terrainToolPanel
                             .padding(.bottom, 80)
@@ -97,11 +101,61 @@ struct MapEditorView: View {
                     // Donji mini izbornik: sivi okrugli gumbi s ikonama
                     editorBottomBar
                         .padding(.bottom, 16)
+
+                    // Konzola Map Editora (selector, hit test, stanje)
+                    VStack(alignment: .trailing, spacing: 4) {
+                        if !showConsole {
+                            Button("Konzola ▶") { showConsole = true }
+                                .font(.system(size: 11))
+                                .foregroundStyle(.white.opacity(0.7))
+                                .padding(8)
+                        }
+                        if showConsole {
+                            VStack(alignment: .leading, spacing: 0) {
+                                HStack {
+                                    Text("Konzola")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.9))
+                                    Spacer()
+                                    Button("Očisti") { mapEditorConsole.clear() }
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.white.opacity(0.8))
+                                    Button("▼") { showConsole = false }
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.white.opacity(0.8))
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.black.opacity(0.7))
+                                ScrollView(.vertical, showsIndicators: true) {
+                                    LazyVStack(alignment: .leading, spacing: 2) {
+                                        ForEach(Array(mapEditorConsole.lines.enumerated()), id: \.offset) { _, line in
+                                            Text(line)
+                                                .font(.system(size: 10).monospaced())
+                                                .foregroundStyle(.green.opacity(0.95))
+                                                .textSelection(.enabled)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                        }
+                                    }
+                                    .padding(8)
+                                }
+                                .frame(height: 140)
+                                .background(Color.black.opacity(0.85))
+                            }
+                            .frame(maxWidth: 320)
+                            .cornerRadius(8)
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.2), lineWidth: 1))
+                        }
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         )
         .onAppear {
+            mapEditorConsole.append("Map Editor učitan. Odaberi Teren i kocku/krug za selector.")
+            PlacementDebugConsole.verbose = true
             let (ok, message) = HugeWall.checkAndLogTextureStatus(bundle: .main)
             gameState.wallTextureStatus = ok ? "OK" : message
         }
@@ -112,7 +166,7 @@ struct MapEditorView: View {
         }
     }
 
-    /// Panel opcija za teren: Podigni za 5, Podigni za 10, Izravnaj.
+    /// Panel opcija za teren: Podigni za 5/10, Spusti za 5/10, Izravnaj.
     private var terrainToolPanel: some View {
         HStack(spacing: 10) {
             ForEach(TerrainToolOption.allCases, id: \.rawValue) { option in
@@ -203,7 +257,7 @@ struct MapEditorView: View {
             HUDBarDivider()
 
             if selectedEditorCategory == .teren {
-                // 3 kocke (mala, srednja, velika) + 3 kruga (mali, srednji, veliki) – samo jedan izabran; ghost na mapi prikazuje oblik
+                // 3 kocke + 3 kruga = veličina područja; klik primjenjuje alat (Podigni/Spusti/Izravnaj) na to područje
                 HStack(spacing: 10) {
                     ForEach([TerrainBrushOption.kockaMala, .kockaSrednja, .kockaVelika], id: \.rawValue) { option in
                         Button {
@@ -229,6 +283,7 @@ struct MapEditorView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                .help("Odaberi oblik i veličinu: klik na mapu primjenjuje trenutni alat (Podigni/Spusti/Izravnaj) na to područje.")
                 HUDBarDivider()
             }
 
@@ -283,6 +338,12 @@ struct MapEditorView: View {
             .buttonStyle(.plain)
 
             Spacer(minLength: 0)
+
+            HUDBarDivider()
+
+            Text("Mapa: \(gameState.gameMap.displayDimensionString)")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.9))
 
             HUDBarDivider()
 

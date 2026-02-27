@@ -48,6 +48,9 @@ enum MapScale {
     /// 1 logička ćelija mape (za gradnju) = 40×40 world jedinica. Preset 200×200 = 200×200 takvih ćelija.
     static var worldUnitsPerMapCell: CGFloat { objectCubeWorldUnits }
 
+    /// Elevacija terena: 1 prostorna kockica (10×10) = 10 world jedinica u visinu. Podigni za 5 = +50, za 10 = +100 (točno 5 odnosno 10 prostornih kockica).
+    static var worldUnitsPerElevationStep: CGFloat { smallSpatialUnitWorldUnits }
+
     /// Broj minimalnih jedinica po strani za dani preset (200, 400, …). To je „side” u MapDimension.
     static func smallUnitsPerSide(presetSide side: Int) -> Int { side }
 

@@ -21,8 +21,9 @@ final class GameMap: ObservableObject {
         return MapDimension.allSides.contains(rows) ? rows : (rows * MapScale.smallCellsPerObjectCubeSide)
     }
 
-    /// Korisnički prikaz dimenzije: "200×200" (side).
+    /// Korisnički prikaz dimenzije: "200×200" (side). Kad je mapa prazna (0×0), vraća "—×—".
     var displayDimensionString: String {
+        guard rows > 0, cols > 0 else { return "—×—" }
         if let side = sideInSmallUnits { return "\(side)×\(side)" }
         return "\(rows)×\(cols)"
     }

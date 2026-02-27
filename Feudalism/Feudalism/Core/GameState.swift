@@ -112,6 +112,7 @@ final class GameState: ObservableObject {
     /// Jedini izvor istine za kamen, drvo, željezo – sve davanja/trošenja/prodaja idu preko ovoga.
     let resources: GameResources
     private var resourcesCancellable: AnyCancellable?
+    private var mapEditorStateCancellable: AnyCancellable?
     @Published var hay: Int = 0
     @Published var hop: Int = 0
 
@@ -229,6 +230,12 @@ final class GameState: ObservableObject {
         self.audioSpeechVolume = UserDefaults.standard.object(forKey: Self.audioSpeechVolumeKey) as? Double ?? 0.8
         self.currentLevelName = "Level"  // učitaj Level.scn ako postoji; inače proceduralni teren
         self.resourcesCancellable = res.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+    }
+
+    /// Proslijedi promjene iz mapEditorState (npr. selectedCells) da se SwiftUI i overlay odabira osvježe.
+    private func bindMapEditorStateChanges() {
+        mapEditorStateCancellable?.cancel()
+        mapEditorStateCancellable = mapEditorState?.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
     }
 
     // MARK: - Način igre
@@ -496,6 +503,7 @@ extension GameState {
         mapEditorMapName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         mapEditorCreatedDate = Date()
         mapEditorState = MapEditorState()
+        bindMapEditorStateChanges()
         mapEditorSceneVersion += 1
         selectedPlacementObjectId = nil
         isShowingMainMenu = false
@@ -511,6 +519,7 @@ extension GameState {
         setMapSize(preset)
         mapEditorCurrentSlot = .solo
         mapEditorState = MapEditorState()
+        bindMapEditorStateChanges()
         selectedPlacementObjectId = nil
         isShowingMainMenu = false
         isMapEditorMode = true
@@ -522,6 +531,7 @@ extension GameState {
     /// Otvori Map Editor nakon učitavanja mape (mapa je već postavljena). Generira editor-only stanje i veže na mapu.
     func openMapEditorAfterLoad() {
         mapEditorState = MapEditorState()
+        bindMapEditorStateChanges()
         selectedPlacementObjectId = nil
         isShowingMainMenu = false
         isMapEditorMode = true
@@ -531,6 +541,8 @@ extension GameState {
 
     /// Zatvori Map Editor i vrati se na izbornik. Očisti editor-only stanje.
     func closeMapEditor() {
+        mapEditorStateCancellable?.cancel()
+        mapEditorStateCancellable = nil
         mapEditorState?.clear()
         mapEditorState = nil
         isMapEditorMode = false
@@ -669,6 +681,8 @@ extension GameState {
 enum TerrainToolOption: String, CaseIterable {
     case raise5 = "Podigni za 5"
     case raise10 = "Podigni za 10"
+    case lower5 = "Spusti za 5"
+    case lower10 = "Spusti za 10"
     case flatten = "Izravnaj"
 }
 
@@ -681,11 +695,12 @@ enum TerrainBrushOption: String, CaseIterable {
     case krugSrednji
     case krugVeliki
 
+    /// Mala = 1×1, srednja = 3×3, velika = 9×9 (stranica = 2*radius+1).
     var radius: Int {
         switch self {
-        case .kockaMala, .krugMali: return 1
-        case .kockaSrednja, .krugSrednji: return 2
-        case .kockaVelika, .krugVeliki: return 3
+        case .kockaMala, .krugMali: return 0   // 1×1
+        case .kockaSrednja, .krugSrednji: return 1   // 3×3
+        case .kockaVelika, .krugVeliki: return 4   // 9×9
         }
     }
 
@@ -713,18 +728,72 @@ extension GameState {
                 cellsToUpdate.append((row, col))
             }
         }
+        let step = MapScale.worldUnitsPerElevationStep
         let centerHeight = gameMap.height(at: MapCoordinate(row: centerRow, col: centerCol))
         for (row, col) in cellsToUpdate {
             let coord = MapCoordinate(row: row, col: col)
             let current = gameMap.height(at: coord)
             let newHeight: CGFloat
             switch tool {
-            case .raise5: newHeight = current + 5
-            case .raise10: newHeight = current + 10
+            case .raise5: newHeight = current + 5 * step   // 5 prostornih kockica (10×10)
+            case .raise10: newHeight = current + 10 * step // 10 prostornih kockica
+            case .lower5: newHeight = current - 5 * step
+            case .lower10: newHeight = current - 10 * step
             case .flatten: newHeight = centerHeight
             }
             gameMap.setHeight(at: coord, newHeight)
         }
+        objectWillChange.send()
+    }
+
+    /// Primijeni alat za teren samo na označene ćelije (Map Editor – mod „Odabir ćelija”).
+    func applyTerrainElevationToSelectedCells(tool: TerrainToolOption) {
+        guard let editorState = mapEditorState, !editorState.selectedCells.isEmpty else { return }
+        let coords = Array(editorState.selectedCells)
+        let centerCoord = coords.first!
+        let centerHeight = gameMap.height(at: centerCoord)
+        let step = MapScale.worldUnitsPerElevationStep
+        for coord in coords {
+            guard gameMap.isValid(coord) else { continue }
+            let current = gameMap.height(at: coord)
+            let newHeight: CGFloat
+            switch tool {
+            case .raise5: newHeight = current + 5 * step
+            case .raise10: newHeight = current + 10 * step
+            case .lower5: newHeight = current - 5 * step
+            case .lower10: newHeight = current - 10 * step
+            case .flatten: newHeight = centerHeight
+            }
+            gameMap.setHeight(at: coord, newHeight)
+        }
+        objectWillChange.send()
+    }
+
+    /// Postavi visinu svih označenih ćelija na zadanu vrijednost.
+    func setHeightForSelectedCells(_ height: CGFloat) {
+        guard let editorState = mapEditorState else { return }
+        for coord in editorState.selectedCells {
+            guard gameMap.isValid(coord) else { continue }
+            gameMap.setHeight(at: coord, height)
+        }
+        objectWillChange.send()
+    }
+
+    /// Dodaj u odabir sve ćelije u obliku četkice (3 kruga / 3 kocke = selectori za označavanje ćelija koje će ići gore/dolje).
+    func addBrushRegionToSelection(centerRow: Int, centerCol: Int, brushOption: TerrainBrushOption) {
+        guard let editorState = mapEditorState else { return }
+        let r = brushOption.radius
+        for dr in -r...r {
+            for dc in -r...r {
+                let row = centerRow + dr
+                let col = centerCol + dc
+                guard gameMap.isValid(MapCoordinate(row: row, col: col)) else { continue }
+                if !brushOption.isSquare, dr * dr + dc * dc > r * r { continue }
+                editorState.selectedCells.insert(MapCoordinate(row: row, col: col))
+            }
+        }
+        editorState.objectWillChange.send()
+        objectWillChange.send()
     }
 }
 

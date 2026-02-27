@@ -31,6 +31,8 @@ final class MapEditorState: ObservableObject {
     @Published var selectedCell: MapCoordinate?
     /// Ćelija ispod kursora (hover).
     @Published var hoveredCell: MapCoordinate?
+    /// Označene ćelije za precizno uređivanje visine (klik u modu „Odabir ćelija”).
+    @Published var selectedCells: Set<MapCoordinate> = []
     /// Koordinate prikaza četkice (brush preview) – prikazuje se na sceni.
     @Published var brushPreviewCells: [MapCoordinate] = []
     /// Privremena delta visine za prikaz (npr. +5 dok korisnik drži četkicu).
@@ -71,10 +73,27 @@ final class MapEditorState: ObservableObject {
     var canUndo: Bool { !undoStack.isEmpty }
     var canRedo: Bool { !redoStack.isEmpty }
 
+    /// Uključi/isključi ćeliju u odabir (mod „Odabir ćelija”).
+    func toggleCellSelection(_ coordinate: MapCoordinate) {
+        if selectedCells.contains(coordinate) {
+            selectedCells.remove(coordinate)
+        } else {
+            selectedCells.insert(coordinate)
+        }
+        objectWillChange.send()
+    }
+
+    /// Ukloni sve označene ćelije iz odabira.
+    func clearCellSelection() {
+        selectedCells.removeAll()
+        objectWillChange.send()
+    }
+
     /// Očisti sve editor-only stanje (npr. pri izlasku iz editora).
     func clear() {
         selectedCell = nil
         hoveredCell = nil
+        selectedCells = []
         brushPreviewCells = []
         tempHeightDelta = 0
         paintMask = []
